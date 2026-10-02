@@ -332,6 +332,14 @@ const handleGoogleLogin = async () => {
           <Link to="/register">Create Account</Link>
         </p>
 
+        <p className="auth-footer">
+          <Link to="/forgot-password">Forgot password?</Link>
+          {" · "}
+          <Link to="/doctor/login">Doctor login</Link>
+          {" · "}
+          <Link to="/staff/login">Staff login</Link>
+        </p>
+
       </div>
 
     </div>

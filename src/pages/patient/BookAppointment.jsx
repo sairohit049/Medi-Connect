@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import { supabase } from "../../services/supabase";
 import { fetchDoctorsWithNames } from "../../services/doctorService";
+import { notifyDoctorById } from "../../services/notificationService";
 
 const BookAppointment = () => {
   const navigate = useNavigate();
@@ -133,6 +134,12 @@ const BookAppointment = () => {
         ]);
 
       if (appointmentError) throw appointmentError;
+
+      await notifyDoctorById(
+        doctorId,
+        "New appointment request",
+        `${storedUser.full_name || "A patient"} requested an appointment on ${appointmentDate} at ${appointmentTime}.`
+      );
 
       await Swal.fire({
         icon: "success",

@@ -10,6 +10,7 @@ import {
 } from "react-bootstrap";
 import Swal from "sweetalert2";
 import { supabase } from "../../services/supabase";
+import { notifyPatientById } from "../../services/notificationService";
 
 const DoctorAppointments = () => {
   const navigate = useNavigate();
@@ -132,6 +133,13 @@ const DoctorAppointments = () => {
         throw error;
       }
 
+      const changed = appointments.find((item) => item.id === appointmentId);
+      await notifyPatientById(
+        changed?.patient_id,
+        "Appointment update",
+        `Your appointment on ${changed?.appointment_date} is now ${status}.`
+      );
+
       setAppointments((previous) =>
         previous.map((appointment) =>
           appointment.id === appointmentId
@@ -160,6 +168,7 @@ const DoctorAppointments = () => {
     switch (status) {
       case "confirmed":
       case "scheduled":
+      case "checked_in":
         return "success";
 
       case "completed":
@@ -307,7 +316,8 @@ const DoctorAppointments = () => {
                     )}
 
                     {(appointment.status === "confirmed" ||
-                      appointment.status === "scheduled") && (
+                      appointment.status === "scheduled" ||
+                      appointment.status === "checked_in") && (
                       <Button
                         size="sm"
                         variant="primary"

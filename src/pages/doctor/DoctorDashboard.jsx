@@ -1,356 +1,149 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Swal from "sweetalert2";
-import "./DoctorDashboard.css";
+import { Row, Col, Card, Table, Button, Result, Flex, Typography, message } from "antd";
+import {
+  CalendarOutlined,
+  ClockCircleOutlined,
+  TeamOutlined,
+  FileTextOutlined,
+} from "@ant-design/icons";
+import { useAuth } from "../../context/AuthContext";
+import { supabase } from "../../services/supabase";
+import { getDoctorByUserId } from "../../services/directoryService";
+import { fetchAppointmentsDetailed } from "../../services/appointmentService";
+import { PageHeader, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
+
+const { Text } = Typography;
 
 const DoctorDashboard = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [doctor, setDoctor] = useState(null);
+  const [appointments, setAppointments] = useState([]);
+  const [records, setRecords] = useState(0);
 
-  const user = JSON.parse(localStorage.getItem("user"));
+  useEffect(() => {
+    let active = true;
 
-  // These pages are not built yet
-  const comingSoon = () =>
-    Swal.fire({
-      icon: "info",
-      title: "Coming soon",
-      text: "This section has not been built yet.",
-    });
+    const load = async () => {
+      try {
+        const doctorRow = await getDoctorByUserId(user.id);
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    navigate("/doctor/login");
-  };
+        if (!doctorRow) return;
+
+        const [list, recordRes] = await Promise.all([
+          fetchAppointmentsDetailed({ doctorId: doctorRow.id }),
+          supabase
+            .from("medical_records")
+            .select("id", { count: "exact", head: true })
+            .eq("doctor_id", doctorRow.id),
+        ]);
+
+        if (!active) return;
+        setDoctor(doctorRow);
+        setAppointments(list);
+        setRecords(recordRes.count || 0);
+      } catch (error) {
+        message.error(error.message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [user.id]);
+
+  if (!loading && !doctor) {
+    return (
+      <Result
+        status="info"
+        title="Complete your doctor profile"
+        subTitle="Add your specialization and fee so patients can find and book you."
+        extra={
+          <Button type="primary" onClick={() => navigate("/doctor/profile")}>
+            Set up profile
+          </Button>
+        }
+      />
+    );
+  }
+
+  const today = todayString();
+  const active = appointments.filter((a) => !["completed", "cancelled"].includes(a.status));
+  const todays = appointments.filter((a) => a.appointment_date === today && a.status !== "cancelled");
+  const pending = appointments.filter((a) => a.status === "pending");
+  const patientCount = new Set(appointments.map((a) => a.patient_id)).size;
+
+  const upcoming = active
+    .filter((a) => a.appointment_date >= today)
+    .sort((a, b) =>
+      `${a.appointment_date} ${a.appointment_time}`.localeCompare(`${b.appointment_date} ${b.appointment_time}`)
+    )
+    .slice(0, 8);
+
+  const columns = [
+    { title: "Date", dataIndex: "appointment_date", render: fmtDate },
+    { title: "Time", dataIndex: "appointment_time", render: fmtTime },
+    { title: "Patient", dataIndex: "patient_name", render: (v) => <Text strong>{v}</Text> },
+    { title: "Reason", dataIndex: "reason", ellipsis: true },
+    { title: "Status", dataIndex: "status", render: (s) => <StatusTag status={s} /> },
+    {
+      title: "",
+      render: (_, r) => (
+        <Button size="small" onClick={() => navigate(`/doctor/patients/${r.patient_id}`)}>
+          View patient
+        </Button>
+      ),
+    },
+  ];
 
   return (
-    <div className="doctor-layout">
-
-      {/* Sidebar */}
-      <aside className="doctor-sidebar">
-
-        <div className="doctor-sidebar-logo">
-          <div className="doctor-logo-icon">🏥</div>
-
-          <div>
-            <h2>MEDICONNECT</h2>
-            <span>Doctor Portal</span>
-          </div>
-        </div>
-
-        <nav className="doctor-sidebar-nav">
-
-          <button
-            className="doctor-nav-item active"
-            onClick={() => navigate("/doctor/dashboard")}
-          >
-            <span>📊</span>
-            Dashboard
-          </button>
-
-          <button
-            className="doctor-nav-item"
-            onClick={() => navigate("/doctor/appointments")}
-          >
-            <span>📅</span>
-            Appointments
-          </button>
-
-          <button
-            className="doctor-nav-item"
-            onClick={() => navigate("/doctor/patients")}
-          >
-            <span>👥</span>
-            Patients
-          </button>
-
-          <button
-            className="doctor-nav-item"
-            onClick={() => comingSoon()}
-          >
-            <span>💊</span>
-            Prescriptions
-          </button>
-
-          <button
-            className="doctor-nav-item"
-            onClick={() => comingSoon()}
-          >
-            <span>👤</span>
-            My Profile
-          </button>
-
-        </nav>
-
-        <button
-          className="doctor-logout-btn"
-          onClick={handleLogout}
-        >
-          <span>🚪</span>
-          Logout
-        </button>
-
-      </aside>
-
-
-      {/* Main Area */}
-      <div className="doctor-main">
-
-        {/* Header */}
-        <header className="doctor-header">
-
-          <div>
-            <h3>Doctor Dashboard</h3>
-            <p>Manage your patients and appointments</p>
-          </div>
-
-          <div className="doctor-header-user">
-
-            <div
-              className="doctor-notification-icon"
-              onClick={() => comingSoon()}
-            >
-              🔔
-              <span className="doctor-notification-dot"></span>
-            </div>
-
-            <div className="doctor-avatar">
-              {user?.full_name?.charAt(0)?.toUpperCase() || "D"}
-            </div>
-
-            <div className="doctor-header-user-info">
-              <strong>
-                Dr. {user?.full_name || "Doctor"}
-              </strong>
-
-              <span>
-                Doctor
-              </span>
-            </div>
-
-          </div>
-
-        </header>
-
-
-        {/* Dashboard Content */}
-        <main className="doctor-dashboard-content">
-
-          {/* Welcome */}
-          <section className="doctor-welcome-section">
-
-            <div>
-              <h1>
-                Good Morning, Dr. {user?.full_name || "Doctor"} 👋
-              </h1>
-
-              <p>
-                Welcome back! Here's an overview of your practice.
-              </p>
-            </div>
-
-          </section>
-
-
-          {/* Statistics */}
-          <section className="doctor-stats-grid">
-
-            <div className="doctor-stat-card">
-
-              <div className="doctor-stat-icon blue">
-                📅
-              </div>
-
-              <div>
-                <h2>0</h2>
-                <p>Today's Appointments</p>
-              </div>
-
-            </div>
-
-
-            <div className="doctor-stat-card">
-
-              <div className="doctor-stat-icon orange">
-                ⏳
-              </div>
-
-              <div>
-                <h2>0</h2>
-                <p>Pending Appointments</p>
-              </div>
-
-            </div>
-
-
-            <div className="doctor-stat-card">
-
-              <div className="doctor-stat-icon green">
-                👥
-              </div>
-
-              <div>
-                <h2>0</h2>
-                <p>Total Patients</p>
-              </div>
-
-            </div>
-
-
-            <div className="doctor-stat-card">
-
-              <div className="doctor-stat-icon purple">
-                💊
-              </div>
-
-              <div>
-                <h2>0</h2>
-                <p>Prescriptions</p>
-              </div>
-
-            </div>
-
-          </section>
-
-
-          {/* Two Column Area */}
-          <section className="doctor-dashboard-grid">
-
-            {/* Today's Appointments */}
-            <div className="doctor-dashboard-card">
-
-              <div className="doctor-card-header">
-
-                <div>
-                  <h2>Today's Appointments</h2>
-                  <p>Your scheduled patient visits</p>
-                </div>
-
-                <span className="doctor-card-icon">
-                  📅
-                </span>
-
-              </div>
-
-
-              <div className="doctor-appointment-box">
-
-                <div className="doctor-patient-avatar">
-                  👤
-                </div>
-
-                <div className="doctor-appointment-info">
-
-                  <h3>
-                    No Appointments
-                  </h3>
-
-                  <p>
-                    Your upcoming patient appointments
-                    will appear here.
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              <button
-                className="doctor-primary-btn"
-                onClick={() =>
-                  navigate("/doctor/appointments")
-                }
-              >
-                View Appointments →
-              </button>
-
-            </div>
-
-
-            {/* Quick Actions */}
-            <div className="doctor-dashboard-card">
-
-              <div className="doctor-card-header">
-
-                <div>
-                  <h2>Quick Actions</h2>
-                  <p>Access important features</p>
-                </div>
-
-                <span className="doctor-card-icon">
-                  ⚡
-                </span>
-
-              </div>
-
-
-              <div className="doctor-quick-actions">
-
-                <button
-                  onClick={() =>
-                    navigate("/doctor/appointments")
-                  }
-                >
-                  <span>📅</span>
-
-                  <div>
-                    <strong>
-                      View Appointments
-                    </strong>
-
-                    <small>
-                      Manage patient visits
-                    </small>
-                  </div>
-                </button>
-
-
-                <button
-                  onClick={() =>
-                    navigate("/doctor/patients")
-                  }
-                >
-                  <span>👥</span>
-
-                  <div>
-                    <strong>
-                      Patient Details
-                    </strong>
-
-                    <small>
-                      View patient information
-                    </small>
-                  </div>
-                </button>
-
-
-                <button
-                  onClick={() =>
-                    comingSoon()
-                  }
-                >
-                  <span>💊</span>
-
-                  <div>
-                    <strong>
-                      Prescriptions
-                    </strong>
-
-                    <small>
-                      Manage prescriptions
-                    </small>
-                  </div>
-                </button>
-
-              </div>
-
-            </div>
-
-          </section>
-
-        </main>
-
-      </div>
-
-    </div>
+    <>
+      <PageHeader
+        title={`Welcome, Dr. ${user.full_name}`}
+        subtitle={doctor ? `${doctor.specialization || "Doctor"} · ${fmtDate(today)}` : ""}
+        extra={
+          <Button type="primary" onClick={() => navigate("/doctor/prescriptions")}>
+            Write prescription
+          </Button>
+        }
+      />
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} sm={12} xl={6}>
+          <StatCard loading={loading} title="Today's appointments" value={todays.length} icon={<CalendarOutlined />} />
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <StatCard loading={loading} title="Awaiting confirmation" value={pending.length} icon={<ClockCircleOutlined />} color="#f59e0b" />
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <StatCard loading={loading} title="Patients seen" value={patientCount} icon={<TeamOutlined />} color="#6366f1" />
+        </Col>
+        <Col xs={24} sm={12} xl={6}>
+          <StatCard loading={loading} title="Records written" value={records} icon={<FileTextOutlined />} color="#ec4899" />
+        </Col>
+      </Row>
+
+      <Card
+        title="Upcoming appointments"
+        style={{ marginTop: 16, borderRadius: 14 }}
+        extra={<Button type="link" onClick={() => navigate("/doctor/appointments")}>Manage all</Button>}
+      >
+        <Table
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={upcoming}
+          pagination={false}
+          scroll={{ x: "max-content" }}
+          locale={{ emptyText: "No upcoming appointments" }}
+        />
+      </Card>
+    </>
   );
 };
 

@@ -19,7 +19,7 @@ export const fetchDoctorsWithNames = async () => {
   if (userIds.length > 0) {
     const { data, error: profileError } = await supabase
       .from("profiles")
-      .select("id, full_name, phone")
+      .select("id, full_name, email, phone")
       .in("id", userIds);
 
     if (profileError) throw profileError;
@@ -31,6 +31,7 @@ export const fetchDoctorsWithNames = async () => {
     return {
       ...doctor,
       full_name: profile?.full_name || doctor.full_name || "Doctor",
+      email: profile?.email || "",
       phone: profile?.phone || null,
     };
   });
