@@ -12,6 +12,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import { supabase } from "../../services/supabase";
+import { fetchDoctorsWithNames } from "../../services/doctorService";
 
 const BookAppointment = () => {
   const navigate = useNavigate();
@@ -38,11 +39,7 @@ const BookAppointment = () => {
 
   const loadDoctors = async () => {
     try {
-      const { data, error } = await supabase
-        .from("doctors")
-        .select("*");
-
-      if (error) throw error;
+      const data = await fetchDoctorsWithNames();
 
       setDoctors(data || []);
     } catch (error) {
@@ -100,12 +97,12 @@ const BookAppointment = () => {
       setSubmitting(true);
 
       // Find the patient's record.
-      // This assumes patients.id matches profiles.id.
+      // patients.user_id links to profiles.id.
       const { data: patient, error: patientError } =
         await supabase
           .from("patients")
           .select("id")
-          .eq("id", storedUser.id)
+          .eq("user_id", storedUser.id)
           .maybeSingle();
 
       if (patientError) throw patientError;

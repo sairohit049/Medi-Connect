@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {Container, Row, Col,Card, Button, Form,InputGroup,Spinner,Badge,} from "react-bootstrap";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
-import { supabase } from "../../services/supabase";
+import { fetchDoctorsWithNames } from "../../services/doctorService";
 
 const FindDoctor = () => {
   const navigate = useNavigate();
@@ -25,25 +25,16 @@ const FindDoctor = () => {
 
   const loadDoctors = async () => {
     try {
-      const { data, error } = await supabase
-        .from("doctors")
-        .select("*");
-
-      if (error) {
-        console.error("Doctor Error:", error);
-
-        Swal.fire({
-          icon: "error",
-          title: "Unable to Load Doctors",
-          text: error.message,
-        });
-
-        return;
-      }
-
+      const data = await fetchDoctorsWithNames();
       setDoctors(data || []);
     } catch (error) {
-      console.error("Error:", error);
+      console.error("Doctor Error:", error);
+
+      Swal.fire({
+        icon: "error",
+        title: "Unable to Load Doctors",
+        text: error.message,
+      });
     } finally {
       setLoading(false);
     }
@@ -54,6 +45,9 @@ const FindDoctor = () => {
 
     if (search.trim() !== "") {
       result = result.filter((doctor) =>
+        doctor.full_name
+          ?.toLowerCase()
+          .includes(search.toLowerCase()) ||
         doctor.specialization
           ?.toLowerCase()
           .includes(search.toLowerCase()) ||
@@ -142,7 +136,7 @@ const FindDoctor = () => {
 
                   <Form.Control
                     type="text"
-                    placeholder="Search by specialization or qualification..."
+                    placeholder="Search by name, specialization or qualification..."
                     value={search}
                     onChange={(e) =>
                       setSearch(e.target.value)
