@@ -23,3 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+src_old/
+src_v3/
+src_v4/
+src-1/
