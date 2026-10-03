@@ -1,10 +1,9 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Card, Form, Input, Button, Avatar, Typography, Flex, message } from "antd";
-import { KeyOutlined, MailOutlined, PhoneOutlined, LockOutlined } from "@ant-design/icons";
+import { Form, Input, Button, message } from "antd";
+import { MailOutlined, PhoneOutlined, LockOutlined } from "@ant-design/icons";
 import { resetPassword } from "../../services/authService";
-
-const { Title, Text } = Typography;
+import { AuthShell } from "../../components/ui";
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
@@ -24,61 +23,48 @@ const ForgotPassword = () => {
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        padding: 16,
-        background: "linear-gradient(135deg, #0f2a2e, #0d9488)",
-      }}
-    >
-      <Card style={{ width: 420, maxWidth: "100%", borderRadius: 18 }}>
-        <Flex vertical align="center" gap={4} style={{ marginBottom: 20 }}>
-          <Avatar size={60} icon={<KeyOutlined />} style={{ background: "#0d9488" }} />
-          <Title level={3} style={{ margin: 0 }}>Reset password</Title>
-          <Text type="secondary" style={{ textAlign: "center" }}>
-            Enter your email and the phone number on your account
-          </Text>
-        </Flex>
-
-        <Form layout="vertical" onFinish={onFinish}>
-          <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}>
-            <Input size="large" prefix={<MailOutlined />} />
-          </Form.Item>
-          <Form.Item name="phone" label="Phone number" rules={[{ required: true }]}>
-            <Input size="large" prefix={<PhoneOutlined />} />
-          </Form.Item>
-          <Form.Item name="password" label="New password" rules={[{ required: true, min: 6 }]} hasFeedback>
-            <Input.Password size="large" prefix={<LockOutlined />} />
-          </Form.Item>
-          <Form.Item
-            name="confirm"
-            label="Confirm new password"
-            dependencies={["password"]}
-            hasFeedback
-            rules={[
-              { required: true },
-              ({ getFieldValue }) => ({
-                validator: (_, value) =>
-                  !value || getFieldValue("password") === value
-                    ? Promise.resolve()
-                    : Promise.reject(new Error("Passwords do not match")),
-              }),
-            ]}
-          >
-            <Input.Password size="large" prefix={<LockOutlined />} />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" size="large" block loading={loading}>
-            Update password
-          </Button>
-        </Form>
-
-        <Flex justify="center" style={{ marginTop: 16 }}>
+    <AuthShell
+      variant="patient"
+      title="Reset password"
+      subtitle="Enter your email and the phone number on your account"
+      footer={
+        <div style={{ textAlign: "center" }}>
           <Link to="/login">Back to login</Link>
-        </Flex>
-      </Card>
-    </div>
+        </div>
+      }
+    >
+      <Form layout="vertical" onFinish={onFinish} requiredMark={false}>
+        <Form.Item name="email" label="Email" rules={[{ required: true, type: "email", message: "Enter a valid email" }]}>
+          <Input size="large" prefix={<MailOutlined />} />
+        </Form.Item>
+        <Form.Item name="phone" label="Phone number" rules={[{ required: true, message: "Enter your phone number" }]}>
+          <Input size="large" prefix={<PhoneOutlined />} />
+        </Form.Item>
+        <Form.Item name="password" label="New password" hasFeedback rules={[{ required: true, min: 6, message: "At least 6 characters" }]}>
+          <Input.Password size="large" prefix={<LockOutlined />} />
+        </Form.Item>
+        <Form.Item
+          name="confirm"
+          label="Confirm new password"
+          dependencies={["password"]}
+          hasFeedback
+          rules={[
+            { required: true, message: "Confirm your password" },
+            ({ getFieldValue }) => ({
+              validator: (_, value) =>
+                !value || getFieldValue("password") === value
+                  ? Promise.resolve()
+                  : Promise.reject(new Error("Passwords do not match")),
+            }),
+          ]}
+        >
+          <Input.Password size="large" prefix={<LockOutlined />} />
+        </Form.Item>
+        <Button type="primary" htmlType="submit" size="large" block loading={loading}>
+          Update password
+        </Button>
+      </Form>
+    </AuthShell>
   );
 };
 

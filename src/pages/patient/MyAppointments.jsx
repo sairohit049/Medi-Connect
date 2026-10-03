@@ -1,286 +1,141 @@
-import React, { useEffect, useState } from "react";
-import {
-  Container,
-  Row,
-  Col,
-  Card,
-  Button,
-  Badge,
-  Spinner,
-} from "react-bootstrap";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Swal from "sweetalert2";
-import { supabase } from "../../services/supabase";
+import { Card, Table, Button, Segmented, Popconfirm, Typography, message } from "antd";
+import { PlusOutlined } from "@ant-design/icons";
+import { useAuth } from "../../context/AuthContext";
+import { ensurePatientRecord } from "../../services/patientService";
+import { fetchAppointmentsDetailed, setAppointmentStatus } from "../../services/appointmentService";
+import { notifyDoctorById } from "../../services/notificationService";
+import { PageHeader, StatusTag, EmptyState, CARD_STYLE, fmtDate, fmtTime, todayString } from "../../components/ui";
+
+const { Text } = Typography;
+
+const OPEN = ["pending", "confirmed", "scheduled"];
 
 const MyAppointments = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
-
-  const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [appointments, setAppointments] = useState([]);
+  const [filter, setFilter] = useState("upcoming");
 
-  useEffect(() => {
-    loadAppointments();
-  }, []);
-
-  const loadAppointments = async () => {
+  const load = useCallback(async () => {
     try {
-      const storedUser = JSON.parse(localStorage.getItem("user"));
-
-      if (!storedUser) {
-        navigate("/login");
-        return;
-      }
-
-      /*
-       * Find the patient's record using the logged-in profile ID.
-       */
-      const { data: patient, error: patientError } =
-        await supabase
-          .from("patients")
-          .select("id")
-          .eq("user_id", storedUser.id)
-          .maybeSingle();
-
-      if (patientError) {
-        throw patientError;
-      }
-
-      if (!patient) {
-        setAppointments([]);
-        return;
-      }
-
-      /*
-       * Load appointments belonging to this patient.
-       */
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .eq("patient_id", patient.id)
-        .order("appointment_date", {
-          ascending: true,
-        });
-
-      if (error) {
-        throw error;
-      }
-
-      setAppointments(data || []);
+      const patient = await ensurePatientRecord(user.id);
+      setAppointments(await fetchAppointmentsDetailed({ patientId: patient.id }));
     } catch (error) {
-      console.error("Appointment Error:", error);
-
-      Swal.fire({
-        icon: "error",
-        title: "Unable to Load Appointments",
-        text: error.message,
-      });
+      message.error(error.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user.id]);
 
-  const getStatusVariant = (status) => {
-    switch (status?.toLowerCase()) {
-      case "approved":
-        return "success";
+  useEffect(() => {
+    load();
+  }, [load]);
 
-      case "confirmed":
-        return "success";
+  const today = todayString();
 
-      case "completed":
-        return "primary";
+  const groups = useMemo(() => {
+    const isUpcoming = (a) => a.appointment_date >= today && ["pending", "confirmed", "scheduled", "checked_in"].includes(a.status);
+    return {
+      all: appointments,
+      upcoming: appointments.filter(isUpcoming),
+      past: appointments.filter((a) => !isUpcoming(a) && a.status !== "cancelled"),
+      cancelled: appointments.filter((a) => a.status === "cancelled"),
+    };
+  }, [appointments, today]);
 
-      case "cancelled":
-        return "danger";
-
-      case "rejected":
-        return "danger";
-
-      case "pending":
-        return "warning";
-
-      default:
-        return "secondary";
+  const cancel = async (appointment) => {
+    try {
+      await setAppointmentStatus(appointment, "cancelled");
+      await notifyDoctorById(
+        appointment.doctor_id,
+        "Appointment cancelled",
+        `${user.full_name} cancelled the appointment on ${fmtDate(appointment.appointment_date)} at ${fmtTime(appointment.appointment_time)}.`
+      );
+      setAppointments((prev) => prev.map((a) => (a.id === appointment.id ? { ...a, status: "cancelled" } : a)));
+      message.success("Appointment cancelled");
+    } catch (error) {
+      message.error(error.message);
     }
   };
 
+  const columns = [
+    { title: "Date", dataIndex: "appointment_date", render: fmtDate },
+    { title: "Time", dataIndex: "appointment_time", render: fmtTime },
+    {
+      title: "Doctor",
+      render: (_, r) => (
+        <>
+          <Text strong>Dr. {r.doctor_name}</Text>
+          <br />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {r.specialization}
+          </Text>
+        </>
+      ),
+    },
+    { title: "Reason", dataIndex: "reason", ellipsis: true },
+    { title: "Status", dataIndex: "status", render: (s) => <StatusTag status={s} /> },
+    {
+      title: "",
+      align: "right",
+      render: (_, r) =>
+        OPEN.includes(r.status) && r.appointment_date >= today ? (
+          <Popconfirm title="Cancel this appointment?" okText="Yes, cancel" okButtonProps={{ danger: true }} onConfirm={() => cancel(r)}>
+            <Button size="small" danger>
+              Cancel
+            </Button>
+          </Popconfirm>
+        ) : null,
+    },
+  ];
+
+  const bookButton = (
+    <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/patient/book-appointment")}>
+      Book appointment
+    </Button>
+  );
+
   return (
-    <div className="bg-light min-vh-100">
-      {/* Navbar */}
+    <>
+      <PageHeader title="My appointments" subtitle="View and manage your appointments" extra={bookButton} />
 
-      <nav className="navbar navbar-dark bg-primary px-4">
-        <span className="navbar-brand fw-bold">
-          🏥 MEDICONNECT
-        </span>
-
-        <Button
-          variant="light"
-          size="sm"
-          onClick={() =>
-            navigate("/patient/dashboard")
-          }
-        >
-          ← Dashboard
-        </Button>
-      </nav>
-
-      <Container className="py-5">
-
-        {/* Page Header */}
-
-        <div className="d-flex justify-content-between align-items-center mb-4">
-
-          <div>
-            <h2 className="fw-bold mb-1">
-              My Appointments
-            </h2>
-
-            <p className="text-muted mb-0">
-              View and manage your appointments
-            </p>
+      {!loading && appointments.length === 0 ? (
+        <EmptyState
+          kind="calendar"
+          title="No appointments yet"
+          description="Book your first appointment with one of our doctors."
+          action={bookButton}
+        />
+      ) : (
+        <Card style={CARD_STYLE}>
+          <div style={{ overflowX: "auto", marginBottom: 16 }}>
+            <Segmented
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "upcoming", label: `Upcoming (${groups.upcoming.length})` },
+                { value: "past", label: `Past (${groups.past.length})` },
+                { value: "cancelled", label: `Cancelled (${groups.cancelled.length})` },
+                { value: "all", label: `All (${groups.all.length})` },
+              ]}
+            />
           </div>
 
-          <Button
-            variant="primary"
-            onClick={() =>
-              navigate("/patient/book-appointment")
-            }
-          >
-            + Book Appointment
-          </Button>
-
-        </div>
-
-        {/* Loading */}
-
-        {loading && (
-          <div className="text-center py-5">
-
-            <Spinner animation="border" />
-
-            <p className="mt-3 text-muted">
-              Loading appointments...
-            </p>
-
-          </div>
-        )}
-
-        {/* No appointments */}
-
-        {!loading && appointments.length === 0 && (
-          <Card className="border-0 shadow-sm">
-
-            <Card.Body className="text-center py-5">
-
-              <div
-                style={{
-                  fontSize: "55px",
-                }}
-              >
-                📅
-              </div>
-
-              <h4 className="fw-bold mt-3">
-                No Appointments
-              </h4>
-
-              <p className="text-muted">
-                You don't have any appointments yet.
-              </p>
-
-              <Button
-                variant="primary"
-                onClick={() =>
-                  navigate(
-                    "/patient/book-appointment"
-                  )
-                }
-              >
-                Book Your First Appointment
-              </Button>
-
-            </Card.Body>
-
-          </Card>
-        )}
-
-        {/* Appointment List */}
-
-        {!loading && appointments.length > 0 && (
-          <Row className="g-4">
-
-            {appointments.map((appointment) => (
-              <Col
-                xs={12}
-                md={6}
-                lg={4}
-                key={appointment.id}
-              >
-
-                <Card className="h-100 border-0 shadow-sm">
-
-                  <Card.Body className="p-4">
-
-                    <div className="d-flex justify-content-between align-items-start mb-3">
-
-                      <div
-                        className="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center"
-                        style={{
-                          width: "55px",
-                          height: "55px",
-                          fontSize: "24px",
-                        }}
-                      >
-                        👨‍⚕️
-                      </div>
-
-                      <Badge
-                        bg={getStatusVariant(
-                          appointment.status
-                        )}
-                      >
-                        {appointment.status ||
-                          "Pending"}
-                      </Badge>
-
-                    </div>
-
-                    <h5 className="fw-bold">
-                      Doctor Appointment
-                    </h5>
-
-                    <hr />
-
-                    <p className="mb-2">
-                      <strong>Date:</strong>{" "}
-                      {appointment.appointment_date ||
-                        "Not scheduled"}
-                    </p>
-
-                    <p className="mb-2">
-                      <strong>Time:</strong>{" "}
-                      {appointment.appointment_time ||
-                        "Not scheduled"}
-                    </p>
-
-                    <p className="mb-2">
-                      <strong>Reason:</strong>{" "}
-                      {appointment.reason ||
-                        "Not specified"}
-                    </p>
-
-                  </Card.Body>
-
-                </Card>
-
-              </Col>
-            ))}
-
-          </Row>
-        )}
-
-      </Container>
-    </div>
+          <Table
+            rowKey="id"
+            loading={loading}
+            columns={columns}
+            dataSource={groups[filter]}
+            pagination={{ pageSize: 8, hideOnSinglePage: true }}
+            scroll={{ x: "max-content" }}
+            locale={{ emptyText: "Nothing here" }}
+          />
+        </Card>
+      )}
+    </>
   );
 };
 

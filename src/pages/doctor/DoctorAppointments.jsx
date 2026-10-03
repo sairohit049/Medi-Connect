@@ -1,363 +1,168 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Container,
-  Card,
-  Button,
-  Badge,
-  Spinner,
-  Alert,
-} from "react-bootstrap";
-import Swal from "sweetalert2";
-import { supabase } from "../../services/supabase";
-import { notifyPatientById } from "../../services/notificationService";
+import { Card, Table, Button, Segmented, Popconfirm, Flex, Typography, message } from "antd";
+import { useAuth } from "../../context/AuthContext";
+import { getDoctorByUserId } from "../../services/directoryService";
+import { fetchAppointmentsDetailed, setAppointmentStatus } from "../../services/appointmentService";
+import { PageHeader, StatusTag, EmptyState, CARD_STYLE, fmtDate, fmtTime, todayString } from "../../components/ui";
+
+const { Text } = Typography;
+
+const ACTIVE = ["confirmed", "scheduled", "checked_in"];
 
 const DoctorAppointments = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
-
-  const [appointments, setAppointments] = useState([]);
-  const [patientNames, setPatientNames] = useState({});
   const [loading, setLoading] = useState(true);
+  const [doctor, setDoctor] = useState(null);
+  const [appointments, setAppointments] = useState([]);
+  const [filter, setFilter] = useState("all");
+  const [busyId, setBusyId] = useState(null);
 
-  const user = JSON.parse(localStorage.getItem("user"));
-
-  useEffect(() => {
-    fetchAppointments();
-  }, []);
-
-  const fetchAppointments = async () => {
+  const load = useCallback(async () => {
     try {
-      if (!user) {
-        navigate("/doctor/login");
-        return;
-      }
-
-      // Find doctor record belonging to logged-in profile
-     const { data: doctor, error: doctorError } = await supabase
-  .from("doctors")
-  .select("*")
-  .eq("user_id", user.id)
-  .maybeSingle();
-
-      if (doctorError) {
-        throw doctorError;
-      }
-
-      if (!doctor) {
-        setAppointments([]);
-        return;
-      }
-
-      // Get appointments for this doctor
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .eq("doctor_id", doctor.id)
-        .order("appointment_date", {
-          ascending: true,
-        });
-
-      if (error) {
-        throw error;
-      }
-
-      const appointmentList = data || [];
-
-      // Patient names: appointments.patient_id -> patients.id -> patients.user_id -> profiles.id
-      const patientIds = [
-        ...new Set(
-          appointmentList.map((item) => item.patient_id).filter(Boolean)
-        ),
-      ];
-
-      const names = {};
-
-      if (patientIds.length > 0) {
-        const { data: patientRows, error: patientError } = await supabase
-          .from("patients")
-          .select("id, user_id")
-          .in("id", patientIds);
-
-        if (patientError) {
-          throw patientError;
-        }
-
-        const userIds = (patientRows || [])
-          .map((row) => row.user_id)
-          .filter(Boolean);
-
-        if (userIds.length > 0) {
-          const { data: profileRows, error: profileError } = await supabase
-            .from("profiles")
-            .select("id, full_name")
-            .in("id", userIds);
-
-          if (profileError) {
-            throw profileError;
-          }
-
-          (patientRows || []).forEach((row) => {
-            const profile = (profileRows || []).find(
-              (item) => item.id === row.user_id
-            );
-            if (profile) {
-              names[row.id] = profile.full_name;
-            }
-          });
-        }
-      }
-
-      setPatientNames(names);
-      setAppointments(appointmentList);
+      const doctorRow = await getDoctorByUserId(user.id);
+      setDoctor(doctorRow);
+      if (doctorRow) setAppointments(await fetchAppointmentsDetailed({ doctorId: doctorRow.id }));
     } catch (error) {
-      console.error(error);
-
-      Swal.fire({
-        icon: "error",
-        title: "Unable to load appointments",
-        text: error.message,
-      });
+      message.error(error.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user.id]);
 
-  const updateStatus = async (appointmentId, status) => {
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const today = todayString();
+
+  const groups = useMemo(
+    () => ({
+      all: appointments,
+      today: appointments.filter((a) => a.appointment_date === today && a.status !== "cancelled"),
+      pending: appointments.filter((a) => a.status === "pending"),
+      confirmed: appointments.filter((a) => ACTIVE.includes(a.status)),
+      completed: appointments.filter((a) => a.status === "completed"),
+      cancelled: appointments.filter((a) => a.status === "cancelled"),
+    }),
+    [appointments, today]
+  );
+
+  const changeStatus = async (appointment, status) => {
+    setBusyId(appointment.id);
     try {
-      const { error } = await supabase
-        .from("appointments")
-        .update({ status })
-        .eq("id", appointmentId);
-
-      if (error) {
-        throw error;
-      }
-
-      const changed = appointments.find((item) => item.id === appointmentId);
-      await notifyPatientById(
-        changed?.patient_id,
-        "Appointment update",
-        `Your appointment on ${changed?.appointment_date} is now ${status}.`
-      );
-
-      setAppointments((previous) =>
-        previous.map((appointment) =>
-          appointment.id === appointmentId
-            ? { ...appointment, status }
-            : appointment
-        )
-      );
-
-      Swal.fire({
-        icon: "success",
-        title: "Status Updated",
-        text: `Appointment marked as ${status}.`,
-        timer: 1500,
-        showConfirmButton: false,
-      });
+      await setAppointmentStatus(appointment, status);
+      setAppointments((prev) => prev.map((a) => (a.id === appointment.id ? { ...a, status } : a)));
+      message.success(`Appointment marked as ${status.replace("_", " ")}`);
     } catch (error) {
-      Swal.fire({
-        icon: "error",
-        title: "Update Failed",
-        text: error.message,
-      });
+      message.error(error.message);
+    } finally {
+      setBusyId(null);
     }
   };
 
-  const getStatusVariant = (status) => {
-    switch (status) {
-      case "confirmed":
-      case "scheduled":
-      case "checked_in":
-        return "success";
+  const columns = [
+    {
+      title: "Date",
+      dataIndex: "appointment_date",
+      render: fmtDate,
+      sorter: (a, b) => a.appointment_date.localeCompare(b.appointment_date),
+    },
+    { title: "Time", dataIndex: "appointment_time", render: fmtTime },
+    {
+      title: "Patient",
+      render: (_, r) => (
+        <>
+          <Text strong>{r.patient_name}</Text>
+          {r.patient_phone && (
+            <>
+              <br />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {r.patient_phone}
+              </Text>
+            </>
+          )}
+        </>
+      ),
+    },
+    { title: "Reason", dataIndex: "reason", ellipsis: true },
+    { title: "Status", dataIndex: "status", render: (s) => <StatusTag status={s} /> },
+    {
+      title: "Actions",
+      render: (_, r) => (
+        <Flex gap={8} wrap="wrap">
+          {r.status === "pending" && (
+            <>
+              <Button size="small" type="primary" loading={busyId === r.id} onClick={() => changeStatus(r, "confirmed")}>
+                Confirm
+              </Button>
+              <Popconfirm title="Cancel this appointment?" okButtonProps={{ danger: true }} onConfirm={() => changeStatus(r, "cancelled")}>
+                <Button size="small" danger>
+                  Cancel
+                </Button>
+              </Popconfirm>
+            </>
+          )}
+          {ACTIVE.includes(r.status) && (
+            <Button size="small" type="primary" loading={busyId === r.id} onClick={() => changeStatus(r, "completed")}>
+              Mark completed
+            </Button>
+          )}
+          <Button size="small" onClick={() => navigate(`/doctor/patients/${r.patient_id}`)}>
+            Patient details
+          </Button>
+        </Flex>
+      ),
+    },
+  ];
 
-      case "completed":
-        return "primary";
-
-      case "cancelled":
-        return "danger";
-
-      case "pending":
-      default:
-        return "warning";
-    }
-  };
+  if (!loading && !doctor) {
+    return (
+      <EmptyState
+        kind="records"
+        title="Complete your doctor profile first"
+        description="Patients can only book you once your profile exists."
+        action={
+          <Button type="primary" onClick={() => navigate("/doctor/profile")}>
+            Go to profile
+          </Button>
+        }
+      />
+    );
+  }
 
   return (
-    <Container className="py-4">
+    <>
+      <PageHeader title="Appointments" subtitle="View and manage your patient appointments" />
 
-      {/* Header */}
-      <div className="d-flex justify-content-between align-items-center mb-4">
-
-        <div>
-          <h2 className="fw-bold mb-1">
-            Doctor Appointments
-          </h2>
-
-          <p className="text-muted mb-0">
-            View and manage your patient appointments.
-          </p>
+      <Card style={CARD_STYLE}>
+        <div style={{ overflowX: "auto", marginBottom: 16 }}>
+          <Segmented
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "all", label: `All (${groups.all.length})` },
+              { value: "today", label: `Today (${groups.today.length})` },
+              { value: "pending", label: `Pending (${groups.pending.length})` },
+              { value: "confirmed", label: `Confirmed (${groups.confirmed.length})` },
+              { value: "completed", label: `Completed (${groups.completed.length})` },
+              { value: "cancelled", label: `Cancelled (${groups.cancelled.length})` },
+            ]}
+          />
         </div>
 
-        <Button
-          variant="outline-primary"
-          onClick={() => navigate("/doctor/dashboard")}
-        >
-          ← Dashboard
-        </Button>
-
-      </div>
-
-
-      {/* Loading */}
-      {loading && (
-        <div className="text-center py-5">
-          <Spinner animation="border" variant="primary" />
-
-          <p className="text-muted mt-3">
-            Loading appointments...
-          </p>
-        </div>
-      )}
-
-
-      {/* Empty */}
-      {!loading && appointments.length === 0 && (
-        <Alert variant="info" className="text-center">
-          You don't have any appointments yet.
-        </Alert>
-      )}
-
-
-      {/* Appointments */}
-      {!loading && appointments.length > 0 && (
-        <div>
-
-          {appointments.map((appointment) => (
-
-            <Card
-              key={appointment.id}
-              className="mb-3 shadow-sm border-0"
-            >
-
-              <Card.Body>
-
-                <div className="d-flex justify-content-between align-items-start">
-
-                  {/* Appointment information */}
-                  <div>
-
-                    <h5 className="fw-bold">
-                      {patientNames[appointment.patient_id] ||
-                        "Patient Appointment"}
-                    </h5>
-
-                    <p className="mb-1">
-                      <strong>Date:</strong>{" "}
-                      {appointment.appointment_date || "Not available"}
-                    </p>
-
-                    <p className="mb-1">
-                      <strong>Time:</strong>{" "}
-                      {appointment.appointment_time || "Not available"}
-                    </p>
-
-                    <p className="mb-1">
-                      <strong>Reason:</strong>{" "}
-                      {appointment.reason || "Not provided"}
-                    </p>
-
-                    <p className="mb-0">
-                      <strong>Status:</strong>{" "}
-
-                      <Badge
-                        bg={getStatusVariant(
-                          appointment.status
-                        )}
-                      >
-                        {appointment.status || "pending"}
-                      </Badge>
-                    </p>
-
-                  </div>
-
-
-                  {/* Actions */}
-                  <div className="d-flex flex-column gap-2">
-
-                    {appointment.status === "pending" && (
-                      <>
-                        <Button
-                          size="sm"
-                          variant="success"
-                          onClick={() =>
-                            updateStatus(
-                              appointment.id,
-                              "confirmed"
-                            )
-                          }
-                        >
-                          Confirm
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() =>
-                            updateStatus(
-                              appointment.id,
-                              "cancelled"
-                            )
-                          }
-                        >
-                          Cancel
-                        </Button>
-                      </>
-                    )}
-
-                    {(appointment.status === "confirmed" ||
-                      appointment.status === "scheduled" ||
-                      appointment.status === "checked_in") && (
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={() =>
-                          updateStatus(
-                            appointment.id,
-                            "completed"
-                          )
-                        }
-                      >
-                        Mark Completed
-                      </Button>
-                    )}
-
-                    <Button
-                      size="sm"
-                      variant="outline-secondary"
-                      onClick={() =>
-                        navigate(
-                          `/doctor/patients/${appointment.patient_id}`
-                        )
-                      }
-                    >
-                      Patient Details
-                    </Button>
-
-                  </div>
-
-                </div>
-
-              </Card.Body>
-
-            </Card>
-
-          ))}
-
-        </div>
-      )}
-
-    </Container>
+        <Table
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={groups[filter]}
+          pagination={{ pageSize: 8, hideOnSinglePage: true }}
+          scroll={{ x: "max-content" }}
+          locale={{ emptyText: "No appointments here" }}
+        />
+      </Card>
+    </>
   );
 };
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Row, Col, Card, Table, Button, Flex, Typography, message } from "antd";
+import { Row, Col, Card, Table, Button, Typography, message } from "antd";
 import {
   CalendarOutlined,
   FileTextOutlined,
@@ -11,9 +11,9 @@ import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
 import { ensurePatientRecord } from "../../services/patientService";
 import { fetchAppointmentsDetailed } from "../../services/appointmentService";
-import { PageHeader, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
+import { HeroBanner, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 const countOf = (table, column, value) =>
   supabase.from(table).select("id", { count: "exact", head: true }).eq(column, value);
@@ -92,30 +92,28 @@ const PatientDashboard = () => {
 
   return (
     <>
-      <Card
-        style={{
-          borderRadius: 16,
-          marginBottom: 16,
-          background: "linear-gradient(120deg, #0f766e, #14b8a6)",
-          border: "none",
-        }}
-      >
-        <Flex justify="space-between" align="center" wrap="wrap" gap={16}>
-          <div>
-            <Title level={3} style={{ color: "#fff", margin: 0 }}>
-              {greeting()}, {user.full_name}
-            </Title>
-            <Text style={{ color: "rgba(255,255,255,0.85)" }}>
-              {upcoming.length
-                ? `You have ${upcoming.length} upcoming appointment${upcoming.length > 1 ? "s" : ""}.`
-                : "No upcoming appointments. Book one whenever you're ready."}
-            </Text>
-          </div>
-          <Button size="large" onClick={() => navigate("/patient/book-appointment")}>
-            Book appointment
-          </Button>
-        </Flex>
-      </Card>
+      <HeroBanner
+        variant="patient"
+        art="calendar"
+        title={`${greeting()}, ${user.full_name}`}
+        subtitle={
+          loading
+            ? "Checking your appointments..."
+            : upcoming.length
+            ? `You have ${upcoming.length} upcoming appointment${upcoming.length > 1 ? "s" : ""}.`
+            : "No upcoming appointments. Book one whenever you're ready."
+        }
+        actions={
+          <>
+            <Button size="large" onClick={() => navigate("/patient/book-appointment")}>
+              Book appointment
+            </Button>
+            <Button size="large" ghost onClick={() => navigate("/patient/doctors")}>
+              Find a doctor
+            </Button>
+          </>
+        }
+      />
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} xl={6}>

@@ -1,377 +1,206 @@
-import React, { useEffect, useState } from "react";
-import {Container, Row, Col,Card, Button, Form,InputGroup,Spinner,Badge,} from "react-bootstrap";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Swal from "sweetalert2";
+import {
+  Row, Col, Card, Input, Select, Button, Tag, Drawer, Descriptions, Skeleton, Flex, Typography, message,
+} from "antd";
+import {
+  SearchOutlined,
+  ReadOutlined,
+  TrophyOutlined,
+  ClockCircleOutlined,
+  CalendarOutlined,
+} from "@ant-design/icons";
 import { fetchDoctorsWithNames } from "../../services/doctorService";
+import { PageHeader, EmptyState, CARD_STYLE } from "../../components/ui";
+import { DoctorAvatar, DoctorCover, accentFor } from "../../components/art";
+
+const { Text, Title, Paragraph } = Typography;
 
 const FindDoctor = () => {
   const navigate = useNavigate();
-
   const [doctors, setDoctors] = useState([]);
-  const [filteredDoctors, setFilteredDoctors] = useState([]);
-
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [specialization, setSpecialization] = useState("All");
-
-  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
-    loadDoctors();
+    let active = true;
+
+    fetchDoctorsWithNames()
+      .then((data) => active && setDoctors(data || []))
+      .catch((error) => message.error(error.message))
+      .finally(() => active && setLoading(false));
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  useEffect(() => {
-    filterDoctors();
-  }, [search, specialization, doctors]);
+  const specializations = useMemo(
+    () => ["All", ...new Set(doctors.map((d) => d.specialization).filter(Boolean))],
+    [doctors]
+  );
 
-  const loadDoctors = async () => {
-    try {
-      const data = await fetchDoctorsWithNames();
-      setDoctors(data || []);
-    } catch (error) {
-      console.error("Doctor Error:", error);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
 
-      Swal.fire({
-        icon: "error",
-        title: "Unable to Load Doctors",
-        text: error.message,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+    return doctors.filter((doctor) => {
+      const matchesText =
+        !term ||
+        [doctor.full_name, doctor.specialization, doctor.qualification].some((value) =>
+          value?.toLowerCase().includes(term)
+        );
+      const matchesSpec = specialization === "All" || doctor.specialization === specialization;
+      return matchesText && matchesSpec;
+    });
+  }, [doctors, search, specialization]);
 
-  const filterDoctors = () => {
-    let result = [...doctors];
-
-    if (search.trim() !== "") {
-      result = result.filter((doctor) =>
-        doctor.full_name
-          ?.toLowerCase()
-          .includes(search.toLowerCase()) ||
-        doctor.specialization
-          ?.toLowerCase()
-          .includes(search.toLowerCase()) ||
-        doctor.qualification
-          ?.toLowerCase()
-          .includes(search.toLowerCase())
-      );
-    }
-
-    if (specialization !== "All") {
-      result = result.filter(
-        (doctor) =>
-          doctor.specialization === specialization
-      );
-    }
-
-    setFilteredDoctors(result);
-  };
-
-  const specializations = [
-    "All",
-    ...new Set(
-      doctors
-        .map((doctor) => doctor.specialization)
-        .filter(Boolean)
-    ),
-  ];
+  const book = (doctor) => navigate(`/patient/book-appointment?doctor=${doctor.id}`);
 
   return (
-    <div className="bg-light min-vh-100">
+    <>
+      <PageHeader title="Find a doctor" subtitle="Find the right healthcare professional for your needs" />
 
-      {/* Header */}
+      <Card style={{ ...CARD_STYLE, marginBottom: 16 }}>
+        <Row gutter={[12, 12]}>
+          <Col xs={24} md={16}>
+            <Input
+              allowClear
+              size="large"
+              prefix={<SearchOutlined />}
+              placeholder="Search by name, specialization or qualification"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </Col>
+          <Col xs={24} md={8}>
+            <Select
+              size="large"
+              style={{ width: "100%" }}
+              value={specialization}
+              onChange={setSpecialization}
+              options={specializations.map((value) => ({ value, label: value }))}
+            />
+          </Col>
+        </Row>
+      </Card>
 
-      <nav className="navbar navbar-dark bg-primary px-4">
+      <Flex justify="space-between" align="center" style={{ marginBottom: 12 }}>
+        <Title level={5} style={{ margin: 0 }}>
+          Available doctors
+        </Title>
+        <Tag color="teal">{filtered.length} found</Tag>
+      </Flex>
 
-        <span className="navbar-brand fw-bold">
-          🏥 MEDICONNECT
-        </span>
-
-        <Button
-          variant="light"
-          size="sm"
-          onClick={() =>
-            navigate("/patient/dashboard")
-          }
-        >
-          ← Dashboard
-        </Button>
-
-      </nav>
-
-
-      {/* Main */}
-
-      <Container className="py-5">
-
-        <div className="mb-4">
-
-          <h2 className="fw-bold">
-            Find a Doctor
-          </h2>
-
-          <p className="text-muted">
-            Find the right healthcare professional
-            for your needs.
-          </p>
-
-        </div>
-
-
-        {/* Search */}
-
-        <Card className="border-0 shadow-sm mb-4">
-
-          <Card.Body>
-
-            <Row className="g-3">
-
-              <Col md={8}>
-
-                <InputGroup>
-
-                  <InputGroup.Text>
-                    🔍
-                  </InputGroup.Text>
-
-                  <Form.Control
-                    type="text"
-                    placeholder="Search by name, specialization or qualification..."
-                    value={search}
-                    onChange={(e) =>
-                      setSearch(e.target.value)
-                    }
-                  />
-
-                </InputGroup>
-
-              </Col>
-
-
-              <Col md={4}>
-
-                <Form.Select
-                  value={specialization}
-                  onChange={(e) =>
-                    setSpecialization(e.target.value)
-                  }
-                >
-
-                  {specializations.map((item) => (
-                    <option
-                      key={item}
-                      value={item}
-                    >
-                      {item}
-                    </option>
-                  ))}
-
-                </Form.Select>
-
-              </Col>
-
-            </Row>
-
-          </Card.Body>
-
-        </Card>
-
-
-        {/* Doctor Count */}
-
-        <div className="d-flex justify-content-between align-items-center mb-3">
-
-          <h5 className="mb-0">
-            Available Doctors
-          </h5>
-
-          <Badge bg="primary">
-            {filteredDoctors.length} Doctors
-          </Badge>
-
-        </div>
-
-
-        {/* Loading */}
-
-        {loading && (
-          <div className="text-center py-5">
-
-            <Spinner animation="border" />
-
-            <p className="mt-3 text-muted">
-              Loading doctors...
-            </p>
-
-          </div>
-        )}
-
-
-        {/* No Doctors */}
-
-        {!loading &&
-          filteredDoctors.length === 0 && (
-
-            <Card className="border-0 shadow-sm">
-
-              <Card.Body className="text-center py-5">
-
-                <div
-                  style={{ fontSize: "50px" }}
-                >
-                  👨‍⚕️
-                </div>
-
-                <h5 className="mt-3">
-                  No Doctors Found
-                </h5>
-
-                <p className="text-muted">
-                  Try changing your search or
-                  specialization.
-                </p>
-
-              </Card.Body>
-
-            </Card>
-          )}
-
-
-        {/* Doctor Cards */}
-
-        {!loading && filteredDoctors.length > 0 && (
-
-          <Row className="g-4">
-
-            {filteredDoctors.map((doctor) => (
-
-              <Col
-                key={doctor.id}
-                xs={12}
-                md={6}
-                lg={4}
+      {loading ? (
+        <Row gutter={[16, 16]}>
+          {[1, 2, 3].map((n) => (
+            <Col key={n} xs={24} md={12} xl={8}>
+              <Card style={CARD_STYLE}>
+                <Skeleton active avatar paragraph={{ rows: 3 }} />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      ) : filtered.length === 0 ? (
+        <EmptyState kind="search" title="No doctors found" description="Try changing your search or specialization." />
+      ) : (
+        <Row gutter={[16, 16]}>
+          {filtered.map((doctor) => (
+            <Col key={doctor.id} xs={24} md={12} xl={8}>
+              <Card
+                hoverable
+                style={{ ...CARD_STYLE, height: "100%", overflow: "hidden" }}
+                cover={<DoctorCover color={accentFor(doctor.full_name).accent} />}
+                actions={[
+                  <Button key="view" type="link" onClick={() => setSelected(doctor)}>
+                    View profile
+                  </Button>,
+                  <Button key="book" type="link" icon={<CalendarOutlined />} onClick={() => book(doctor)}>
+                    Book
+                  </Button>,
+                ]}
               >
+                <div style={{ marginTop: -62, marginBottom: 10, position: "relative", zIndex: 1 }}>
+                  <DoctorAvatar name={doctor.full_name} size={72} ring />
+                </div>
+                <Title level={5} style={{ margin: 0 }}>
+                  Dr. {doctor.full_name}
+                </Title>
+                <Tag color="cyan" style={{ margin: "6px 0 14px" }}>
+                  {doctor.specialization || "General Physician"}
+                </Tag>
 
-                <Card className="h-100 border-0 shadow-sm">
+                <Flex vertical gap={6}>
+                  <Text>
+                    <ReadOutlined /> {doctor.qualification || "Qualification not listed"}
+                  </Text>
+                  <Text>
+                    <TrophyOutlined />{" "}
+                    {doctor.experience != null ? `${doctor.experience} years experience` : "Experience not listed"}
+                  </Text>
+                  <Text>
+                    <ClockCircleOutlined /> {doctor.availability || "Availability not listed"}
+                  </Text>
+                  <div>
+                    <Tag color="gold">
+                      {doctor.consultation_fee != null ? `Fee ₹${doctor.consultation_fee}` : "Fee on request"}
+                    </Tag>
+                  </div>
+                </Flex>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
 
-                  <Card.Body className="p-4">
+      <Drawer
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        width={420}
+        title={selected ? `Dr. ${selected.full_name}` : ""}
+        footer={
+          selected && (
+            <Button type="primary" size="large" block icon={<CalendarOutlined />} onClick={() => book(selected)}>
+              Book appointment
+            </Button>
+          )
+        }
+      >
+        {selected && (
+          <>
+            <Flex vertical align="center" gap={8} style={{ marginBottom: 20 }}>
+              <DoctorAvatar name={selected.full_name} size={104} ring />
+              <Tag color="cyan" style={{ margin: 0 }}>
+                {selected.specialization || "General Physician"}
+              </Tag>
+            </Flex>
 
-                    {/* Doctor Avatar */}
+            <Descriptions column={1} size="small" bordered>
+              <Descriptions.Item label="Specialization">
+                {selected.specialization || "General Physician"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Qualification">{selected.qualification || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Experience">
+                {selected.experience != null ? `${selected.experience} years` : "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Consultation fee">
+                {selected.consultation_fee != null ? `₹${selected.consultation_fee}` : "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Availability">{selected.availability || "-"}</Descriptions.Item>
+            </Descriptions>
 
-                    <div className="text-center mb-3">
-
-                      <div
-                        className="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center mx-auto"
-                        style={{
-                          width: "80px",
-                          height: "80px",
-                          fontSize: "30px",
-                        }}
-                      >
-                        👨‍⚕️
-                      </div>
-
-                    </div>
-
-
-                    {/* Doctor Name */}
-
-                    <div className="text-center">
-
-                      <h5 className="fw-bold mb-1">
-
-                        Dr.{" "}
-                        {doctor.full_name ||
-                          "Doctor"}
-
-                      </h5>
-
-                      <Badge bg="info">
-                        {doctor.specialization ||
-                          "General Physician"}
-                      </Badge>
-
-                    </div>
-
-
-                    {/* Doctor Information */}
-
-                    <div className="mt-4">
-
-                      <p className="mb-2">
-
-                        <strong>
-                          Qualification:
-                        </strong>{" "}
-
-                        {doctor.qualification ||
-                          "Not specified"}
-
-                      </p>
-
-
-                      <p className="mb-2">
-
-                        <strong>
-                          Experience:
-                        </strong>{" "}
-
-                        {doctor.experience
-                          ? `${doctor.experience} years`
-                          : "Not specified"}
-
-                      </p>
-
-
-                      <p className="mb-2">
-
-                        <strong>
-                          Consultation Fee:
-                        </strong>{" "}
-
-                        ₹
-                        {doctor.consultation_fee ||
-                          "Not specified"}
-
-                      </p>
-
-                    </div>
-
-
-                    {/* Button */}
-
-                    <div className="d-grid mt-4">
-
-                      <Button
-                        variant="primary"
-                        onClick={() =>
-                          Swal.fire({
-                            icon: "info",
-                            title: "Coming Next",
-                            text: "Doctor details and appointment booking will be added next.",
-                          })
-                        }
-                      >
-                        View Doctor
-                      </Button>
-
-                    </div>
-
-                  </Card.Body>
-
-                </Card>
-
-              </Col>
-
-            ))}
-
-          </Row>
-
+            <Title level={5} style={{ marginTop: 20 }}>
+              About
+            </Title>
+            <Paragraph type={selected.about ? undefined : "secondary"}>
+              {selected.about || "This doctor has not added an introduction yet."}
+            </Paragraph>
+          </>
         )}
-
-      </Container>
-
-    </div>
+      </Drawer>
+    </>
   );
 };
 

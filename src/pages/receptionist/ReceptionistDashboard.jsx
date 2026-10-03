@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Row, Col, Card, Table, Button, Space, message } from "antd";
+import { Row, Col, Card, Table, Button, message } from "antd";
 import { CalendarOutlined, ClockCircleOutlined, CheckCircleOutlined, SafetyCertificateOutlined, UserAddOutlined } from "@ant-design/icons";
 import { useAuth } from "../../context/AuthContext";
 import { fetchAppointmentsDetailed } from "../../services/appointmentService";
-import { PageHeader, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
+import { HeroBanner, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
 
 const ReceptionistDashboard = () => {
   const { user } = useAuth();
@@ -38,14 +38,24 @@ const ReceptionistDashboard = () => {
 
   return (
     <>
-      <PageHeader
+      <HeroBanner
+        variant="receptionist"
+        art="patients"
         title={`Hello, ${user.full_name}`}
-        subtitle={`Today's front desk · ${fmtDate(todayString())}`}
-        extra={
-          <Space wrap>
-            <Button icon={<UserAddOutlined />} onClick={() => navigate("/receptionist/register-patient")}>Register patient</Button>
-            <Button type="primary" onClick={() => navigate("/receptionist/appointments")}>Book appointment</Button>
-          </Space>
+        subtitle={
+          loading
+            ? `Front desk for ${fmtDate(todayString())}.`
+            : `Front desk for ${fmtDate(todayString())}. ${today.length} appointment${today.length === 1 ? "" : "s"} on the schedule.`
+        }
+        actions={
+          <>
+            <Button size="large" onClick={() => navigate("/receptionist/appointments")}>
+              Book appointment
+            </Button>
+            <Button size="large" ghost icon={<UserAddOutlined />} onClick={() => navigate("/receptionist/register-patient")}>
+              Register patient
+            </Button>
+          </>
         }
       />
 

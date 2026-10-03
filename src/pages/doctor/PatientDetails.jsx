@@ -1,537 +1,218 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import {
-  Container,
-  Card,
-  Row,
-  Col,
-  Button,
-  Spinner,
-  Alert,
-  Badge,
-} from "react-bootstrap";
-import Swal from "sweetalert2";
+import { Row, Col, Card, Descriptions, Tabs, Table, Button, Tag, Flex, Skeleton, Typography, message } from "antd";
+import { PlusOutlined, MedicineBoxOutlined } from "@ant-design/icons";
+import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
+import { getDoctorByUserId, fetchPatientsByIds, fetchDoctorNames } from "../../services/directoryService";
+import { fetchAppointmentsDetailed } from "../../services/appointmentService";
+import {
+  PageHeader, PersonAvatar, EmptyState, LabeledText, StatusTag, CARD_STYLE, fmtDate, fmtTime,
+} from "../../components/ui";
+
+const { Text, Title } = Typography;
 
 const PatientDetails = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { patientId } = useParams();
 
-  const [patient, setPatient] = useState(null);
-  const [profile, setProfile] = useState(null);
-  const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [patient, setPatient] = useState(null);
+  const [records, setRecords] = useState([]);
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [appointments, setAppointments] = useState([]);
 
   useEffect(() => {
-    fetchPatientDetails();
-  }, [patientId]);
+    let active = true;
 
-  const fetchPatientDetails = async () => {
-    try {
+    const load = async () => {
       setLoading(true);
+      try {
+        const [patientRows, doctorRow] = await Promise.all([
+          fetchPatientsByIds([patientId]),
+          getDoctorByUserId(user.id),
+        ]);
 
-      // ==========================================
-      // STEP 1: CHECK DOCTOR LOGIN
-      // ==========================================
+        const [recordRes, rxRes, appts] = await Promise.all([
+          supabase.from("medical_records").select("*").eq("patient_id", patientId).order("created_at", { ascending: false }),
+          supabase.from("prescriptions").select("*").eq("patient_id", patientId).order("created_at", { ascending: false }),
+          doctorRow ? fetchAppointmentsDetailed({ doctorId: doctorRow.id, patientId }) : Promise.resolve([]),
+        ]);
 
-      const user = JSON.parse(localStorage.getItem("user"));
+        if (recordRes.error) throw recordRes.error;
+        if (rxRes.error) throw rxRes.error;
 
-      if (!user) {
-        navigate("/doctor/login");
-        return;
+        const doctors = await fetchDoctorNames([
+          ...(recordRes.data || []).map((r) => r.doctor_id),
+          ...(rxRes.data || []).map((r) => r.doctor_id),
+        ]);
+
+        if (!active) return;
+        setPatient(patientRows[0] || null);
+        setRecords((recordRes.data || []).map((r) => ({ ...r, doctor: doctors[r.doctor_id] })));
+        setPrescriptions((rxRes.data || []).map((r) => ({ ...r, doctor: doctors[r.doctor_id] })));
+        setAppointments(appts);
+      } catch (error) {
+        message.error(error.message);
+      } finally {
+        if (active) setLoading(false);
       }
+    };
 
-      // ==========================================
-      // STEP 2: GET PATIENT FROM patients TABLE
-      // ==========================================
-      // patientId comes from:
-      //
-      // navigate(`/doctor/patients/${patient.id}`)
-      //
-      // in DoctorPatients.jsx
-      //
-      // Therefore patientId = patients.id
+    load();
+    return () => {
+      active = false;
+    };
+  }, [patientId, user.id]);
 
-      const {
-        data: patientData,
-        error: patientError,
-      } = await supabase
-        .from("patients")
-        .select("*")
-        .eq("id", patientId)
-        .maybeSingle();
-
-      if (patientError) {
-        throw patientError;
-      }
-
-      if (!patientData) {
-        setPatient(null);
-        return;
-      }
-
-      setPatient(patientData);
-
-      // ==========================================
-      // STEP 3: GET PATIENT PROFILE
-      // ==========================================
-      // patients.user_id = profiles.id
-
-      const {
-        data: profileData,
-        error: profileError,
-      } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", patientData.user_id)
-        .eq("role", "patient")
-        .maybeSingle();
-
-      if (profileError) {
-        throw profileError;
-      }
-
-      setProfile(profileData);
-
-      // ==========================================
-      // STEP 4: GET MEDICAL RECORDS
-      // ==========================================
-      // medical_records.patient_id = patients.id
-
-      const {
-        data: recordsData,
-        error: recordsError,
-      } = await supabase
-        .from("medical_records")
-        .select("*")
-        .eq("patient_id", patientData.id)
-        .order("created_at", {
-          ascending: false,
-        });
-
-      if (recordsError) {
-        throw recordsError;
-      }
-
-      setRecords(recordsData || []);
-    } catch (error) {
-      console.error("Error loading patient:", error);
-
-      Swal.fire({
-        icon: "error",
-        title: "Unable to Load Patient",
-        text: error.message,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==========================================
-  // LOADING
-  // ==========================================
-
-  if (loading) {
+  if (!loading && !patient) {
     return (
-      <Container className="py-5 text-center">
-        <Spinner animation="border" variant="primary" />
-
-        <p className="text-muted mt-3">
-          Loading patient details...
-        </p>
-      </Container>
+      <EmptyState
+        kind="search"
+        title="Patient not found"
+        action={
+          <Button type="primary" onClick={() => navigate("/doctor/patients")}>
+            Back to my patients
+          </Button>
+        }
+      />
     );
   }
 
-  // ==========================================
-  // PATIENT NOT FOUND
-  // ==========================================
+  const actions = (
+    <Flex gap={8} wrap="wrap">
+      <Button icon={<MedicineBoxOutlined />} onClick={() => navigate(`/doctor/prescriptions?patient=${patientId}`)}>
+        Write prescription
+      </Button>
+      <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate(`/doctor/patients/${patientId}/diagnosis`)}>
+        Add diagnosis
+      </Button>
+    </Flex>
+  );
 
-  if (!patient) {
-    return (
-      <Container className="py-5">
-        <Alert variant="warning">
-          Patient information was not found.
-        </Alert>
-
-        <Button
-          variant="primary"
-          onClick={() => navigate("/doctor/patients")}
-        >
-          ← Back to Patients
-        </Button>
-      </Container>
+  const recordsTab =
+    records.length === 0 ? (
+      <Text type="secondary">No medical records for this patient yet.</Text>
+    ) : (
+      <Flex vertical gap={12}>
+        {records.map((record) => (
+          <Card
+            key={record.id}
+            size="small"
+            title={fmtDate(record.record_date || record.created_at)}
+            extra={record.doctor && <Tag color="cyan">Dr. {record.doctor.name}</Tag>}
+          >
+            <Row gutter={16}>
+              <Col xs={24} md={12}>
+                <LabeledText label="Diagnosis">
+                  <Text strong>{record.diagnosis}</Text>
+                </LabeledText>
+              </Col>
+              <Col xs={24} md={12}>
+                <LabeledText label="Treatment">{record.treatment}</LabeledText>
+              </Col>
+              <Col xs={24}>
+                <LabeledText label="Notes">{record.notes}</LabeledText>
+              </Col>
+            </Row>
+          </Card>
+        ))}
+      </Flex>
     );
-  }
 
-  // ==========================================
-  // MAIN UI
-  // ==========================================
+  const prescriptionsTab = (
+    <Table
+      rowKey="id"
+      size="small"
+      dataSource={prescriptions}
+      pagination={{ pageSize: 6, hideOnSinglePage: true }}
+      scroll={{ x: "max-content" }}
+      locale={{ emptyText: "No prescriptions yet" }}
+      columns={[
+        { title: "Date", render: (_, r) => fmtDate(r.prescribed_date || r.created_at) },
+        { title: "Medicine", dataIndex: "medicine_name", render: (v) => <Text strong>{v || "-"}</Text> },
+        { title: "Dosage", dataIndex: "dosage", render: (v) => v || "-" },
+        { title: "Frequency", dataIndex: "frequency", render: (v) => v || "-" },
+        { title: "Duration", dataIndex: "duration", render: (v) => v || "-" },
+        { title: "By", render: (_, r) => (r.doctor ? `Dr. ${r.doctor.name}` : "-") },
+      ]}
+    />
+  );
+
+  const appointmentsTab = (
+    <Table
+      rowKey="id"
+      size="small"
+      dataSource={appointments}
+      pagination={{ pageSize: 6, hideOnSinglePage: true }}
+      scroll={{ x: "max-content" }}
+      locale={{ emptyText: "No appointments with you yet" }}
+      columns={[
+        { title: "Date", dataIndex: "appointment_date", render: fmtDate },
+        { title: "Time", dataIndex: "appointment_time", render: fmtTime },
+        { title: "Reason", dataIndex: "reason", ellipsis: true },
+        { title: "Status", dataIndex: "status", render: (s) => <StatusTag status={s} /> },
+      ]}
+    />
+  );
 
   return (
-    <Container className="py-4">
+    <>
+      <PageHeader
+        back="/doctor/patients"
+        title="Patient details"
+        subtitle="Patient information and medical history"
+        extra={actions}
+      />
 
-      {/* ======================================
-          HEADER
-      ====================================== */}
-
-      <div className="d-flex justify-content-between align-items-center mb-4">
-
-        <div>
-          <h2 className="fw-bold mb-1">
-            Patient Details
-          </h2>
-
-          <p className="text-muted mb-0">
-            View patient information and medical history.
-          </p>
-        </div>
-
-        <div className="d-flex gap-2">
-
-          {/* ADD DIAGNOSIS */}
-
-          <Button
-            variant="primary"
-            onClick={() =>
-              navigate(
-                `/doctor/patients/${patient.id}/diagnosis`
-              )
-            }
-          >
-            + Add Diagnosis
-          </Button>
-
-          {/* BACK TO PATIENTS */}
-
-          <Button
-            variant="outline-primary"
-            onClick={() =>
-              navigate("/doctor/patients")
-            }
-          >
-            ← My Patients
-          </Button>
-
-        </div>
-      </div>
-
-      {/* ======================================
-          PATIENT PROFILE
-      ====================================== */}
-
-      <Card className="shadow-sm border-0 mb-4">
-
-        <Card.Body>
-
-          {/* PATIENT NAME */}
-
-          <div className="d-flex align-items-center gap-3 mb-4">
-
-            <div
-              className="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center"
-              style={{
-                width: "70px",
-                height: "70px",
-                fontSize: "28px",
-                fontWeight: "bold",
-              }}
-            >
-              {profile?.full_name
-                ?.charAt(0)
-                ?.toUpperCase() || "P"}
-            </div>
-
-            <div>
-
-              <h3 className="fw-bold mb-1">
-                {profile?.full_name || "Patient"}
-              </h3>
-
-              <Badge bg="primary">
-                Patient
-              </Badge>
-
-            </div>
-
-          </div>
-
-          <Row>
-
-            {/* EMAIL */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Email</strong>
-
-              <div className="text-muted">
-                {profile?.email || "Not available"}
+      <Card style={{ ...CARD_STYLE, marginBottom: 16 }} loading={loading}>
+        {patient && (
+          <>
+            <Flex align="center" gap={16} style={{ marginBottom: 20 }}>
+              <PersonAvatar name={patient.full_name} size={64} />
+              <div>
+                <Title level={4} style={{ margin: 0 }}>
+                  {patient.full_name}
+                </Title>
+                <Flex gap={6} style={{ marginTop: 4 }}>
+                  <Tag color="teal">Patient</Tag>
+                  {patient.blood_group && <Tag color="red">{patient.blood_group}</Tag>}
+                </Flex>
               </div>
+            </Flex>
 
-            </Col>
-
-            {/* PHONE */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Phone</strong>
-
-              <div className="text-muted">
-                {profile?.phone || "Not available"}
-              </div>
-
-            </Col>
-
-            {/* PATIENT ID */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Patient ID</strong>
-
-              <div className="text-muted text-break">
-                {patient.id}
-              </div>
-
-            </Col>
-
-            {/* DATE OF BIRTH */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Date of Birth</strong>
-
-              <div className="text-muted">
-                {patient.date_of_birth
-                  ? new Date(
-                      patient.date_of_birth
-                    ).toLocaleDateString()
-                  : "Not available"}
-              </div>
-
-            </Col>
-
-            {/* GENDER */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Gender</strong>
-
-              <div className="text-muted">
-                {patient.gender || "Not available"}
-              </div>
-
-            </Col>
-
-            {/* BLOOD GROUP */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Blood Group</strong>
-
-              <div className="text-muted">
-                {patient.blood_group || "Not available"}
-              </div>
-
-            </Col>
-
-            {/* ADDRESS */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Address</strong>
-
-              <div className="text-muted">
-                {patient.address || "Not available"}
-              </div>
-
-            </Col>
-
-            {/* EMERGENCY CONTACT */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Emergency Contact</strong>
-
-              <div className="text-muted">
-                {patient.emergency_contact ||
-                  "Not available"}
-              </div>
-
-            </Col>
-
-            {/* EMERGENCY PHONE */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Emergency Phone</strong>
-
-              <div className="text-muted">
-                {patient.emergency_phone ||
-                  "Not available"}
-              </div>
-
-            </Col>
-
-            {/* REGISTERED DATE */}
-
-            <Col md={6} className="mb-3">
-
-              <strong>Registered On</strong>
-
-              <div className="text-muted">
-
-                {patient.created_at
-                  ? new Date(
-                      patient.created_at
-                    ).toLocaleDateString()
-                  : "Not available"}
-
-              </div>
-
-            </Col>
-
-          </Row>
-
-        </Card.Body>
-
+            <Descriptions column={{ xs: 1, md: 2 }} size="small" bordered>
+              <Descriptions.Item label="Email">{patient.email || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Phone">{patient.phone || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Date of birth">{fmtDate(patient.date_of_birth)}</Descriptions.Item>
+              <Descriptions.Item label="Gender">{patient.gender || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Blood group">{patient.blood_group || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Registered">{fmtDate(patient.created_at)}</Descriptions.Item>
+              <Descriptions.Item label="Address" span={2}>
+                {patient.address || "-"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Emergency contact">{patient.emergency_contact || "-"}</Descriptions.Item>
+              <Descriptions.Item label="Emergency phone">{patient.emergency_phone || "-"}</Descriptions.Item>
+            </Descriptions>
+          </>
+        )}
       </Card>
 
-      {/* ======================================
-          MEDICAL RECORDS
-      ====================================== */}
-
-      <Card className="shadow-sm border-0">
-
-        <Card.Body>
-
-          <div className="d-flex justify-content-between align-items-center mb-4">
-
-            <div>
-
-              <h4 className="fw-bold mb-1">
-                Medical Records
-              </h4>
-
-              <p className="text-muted mb-0">
-                Patient's previous medical records.
-              </p>
-
-            </div>
-
-            <span style={{ fontSize: "28px" }}>
-              📋
-            </span>
-
-          </div>
-
-          {/* NO MEDICAL RECORDS */}
-
-          {records.length === 0 ? (
-
-            <Alert
-              variant="info"
-              className="text-center"
-            >
-              No medical records found for this patient.
-            </Alert>
-
-          ) : (
-
-            records.map((record) => (
-
-              <Card
-                key={record.id}
-                className="mb-3 border"
-              >
-
-                <Card.Body>
-
-                  <Row>
-
-                    {/* DIAGNOSIS */}
-
-                    <Col md={6} className="mb-3">
-
-                      <strong>
-                        Diagnosis
-                      </strong>
-
-                      <div className="text-muted">
-                        {record.diagnosis ||
-                          "Not provided"}
-                      </div>
-
-                    </Col>
-
-                    {/* RECORD DATE */}
-
-                    <Col md={6} className="mb-3">
-
-                      <strong>
-                        Record Date
-                      </strong>
-
-                      <div className="text-muted">
-
-                        {record.record_date
-                          ? new Date(
-                              record.record_date
-                            ).toLocaleDateString()
-                          : record.created_at
-                          ? new Date(
-                              record.created_at
-                            ).toLocaleDateString()
-                          : "Not available"}
-
-                      </div>
-
-                    </Col>
-
-                    {/* TREATMENT */}
-
-                    <Col md={12} className="mb-3">
-
-                      <strong>
-                        Treatment
-                      </strong>
-
-                      <div className="text-muted">
-                        {record.treatment ||
-                          "Not provided"}
-                      </div>
-
-                    </Col>
-
-                    {/* NOTES */}
-
-                    <Col md={12}>
-
-                      <strong>
-                        Notes
-                      </strong>
-
-                      <div className="text-muted">
-                        {record.notes ||
-                          "No additional notes"}
-                      </div>
-
-                    </Col>
-
-                  </Row>
-
-                </Card.Body>
-
-              </Card>
-
-            ))
-
-          )}
-
-        </Card.Body>
-
+      <Card style={CARD_STYLE}>
+        {loading ? (
+          <Skeleton active paragraph={{ rows: 4 }} />
+        ) : (
+          <Tabs
+            items={[
+              { key: "records", label: `Medical records (${records.length})`, children: recordsTab },
+              { key: "prescriptions", label: `Prescriptions (${prescriptions.length})`, children: prescriptionsTab },
+              { key: "appointments", label: `Appointments (${appointments.length})`, children: appointmentsTab },
+            ]}
+          />
+        )}
       </Card>
-
-    </Container>
+    </>
   );
 };
 

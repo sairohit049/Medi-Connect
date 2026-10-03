@@ -1,12 +1,15 @@
 import React, { useCallback, useEffect, useState } from "react";
 import dayjs from "dayjs";
-import { Card, List, Badge, Avatar, Button, Empty, Typography, Popconfirm, Flex, message } from "antd";
+import { Card, List, Badge, Avatar, Button, Typography, Popconfirm, Flex, message } from "antd";
 import { BellOutlined, CheckOutlined, DeleteOutlined } from "@ant-design/icons";
 import { supabase } from "../../services/supabase";
 import { useAuth } from "../../context/AuthContext";
 import { PageHeader } from "../../components/ui";
+import { EmptyArt } from "../../components/art";
 
 const { Text } = Typography;
+
+const refreshBell = () => window.dispatchEvent(new Event("notifications-changed"));
 
 const NotificationsPage = () => {
   const { user } = useAuth();
@@ -34,6 +37,7 @@ const NotificationsPage = () => {
     const { error } = await supabase.from("notifications").update({ is_read: true }).eq("id", id);
     if (error) return message.error(error.message);
     setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    refreshBell();
   };
 
   const markAllRead = async () => {
@@ -44,12 +48,14 @@ const NotificationsPage = () => {
       .eq("is_read", false);
     if (error) return message.error(error.message);
     setItems((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    refreshBell();
   };
 
   const remove = async (id) => {
     const { error } = await supabase.from("notifications").delete().eq("id", id);
     if (error) return message.error(error.message);
     setItems((prev) => prev.filter((n) => n.id !== id));
+    refreshBell();
   };
 
   const unread = items.filter((n) => !n.is_read).length;
@@ -70,7 +76,15 @@ const NotificationsPage = () => {
         <List
           loading={loading}
           dataSource={items}
-          locale={{ emptyText: <Empty description="No notifications yet" /> }}
+          locale={{
+            emptyText: (
+              <Flex vertical align="center" style={{ padding: "16px 0" }}>
+                <EmptyArt kind="bell" size={150} />
+                <Text strong>No notifications yet</Text>
+                <Text type="secondary">Updates about your appointments will show up here.</Text>
+              </Flex>
+            ),
+          }}
           renderItem={(n) => (
             <List.Item
               actions={[

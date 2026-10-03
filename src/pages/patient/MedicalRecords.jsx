@@ -1,270 +1,87 @@
 import React, { useEffect, useState } from "react";
-import {
-  Container,
-  Row,
-  Col,
-  Card,
-  Button,
-  Badge,
-  Spinner,
-} from "react-bootstrap";
-import { useNavigate } from "react-router-dom";
-import Swal from "sweetalert2";
+import { Row, Col, Card, Tag, Skeleton, Flex, Typography, message } from "antd";
+import { FileTextOutlined } from "@ant-design/icons";
+import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
+import { ensurePatientRecord } from "../../services/patientService";
+import { fetchDoctorNames } from "../../services/directoryService";
+import { PageHeader, EmptyState, LabeledText, CARD_STYLE, fmtDate } from "../../components/ui";
+
+const { Text } = Typography;
 
 const MedicalRecords = () => {
-  const navigate = useNavigate();
-
-  const [records, setRecords] = useState([]);
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [records, setRecords] = useState([]);
 
   useEffect(() => {
-    loadMedicalRecords();
-  }, []);
+    let active = true;
 
-  const loadMedicalRecords = async () => {
-    try {
-      const storedUser = JSON.parse(
-        localStorage.getItem("user")
-      );
+    const load = async () => {
+      try {
+        const patient = await ensurePatientRecord(user.id);
 
-      if (!storedUser) {
-        navigate("/login");
-        return;
+        const { data, error } = await supabase
+          .from("medical_records")
+          .select("*")
+          .eq("patient_id", patient.id)
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+
+        const doctors = await fetchDoctorNames((data || []).map((r) => r.doctor_id));
+        if (active) setRecords((data || []).map((r) => ({ ...r, doctor: doctors[r.doctor_id] })));
+      } catch (error) {
+        message.error(error.message);
+      } finally {
+        if (active) setLoading(false);
       }
+    };
 
-      // Find the patient's record
-      const { data: patient, error: patientError } =
-        await supabase
-          .from("patients")
-          .select("id")
-          .eq("user_id", storedUser.id)
-          .maybeSingle();
-
-      if (patientError) {
-        throw patientError;
-      }
-
-      if (!patient) {
-        setRecords([]);
-        return;
-      }
-
-      // Get medical records for this patient
-      const { data, error } = await supabase
-        .from("medical_records")
-        .select("*")
-        .eq("patient_id", patient.id)
-        .order("created_at", {
-          ascending: false,
-        });
-
-      if (error) {
-        throw error;
-      }
-
-      setRecords(data || []);
-    } catch (error) {
-      console.error(
-        "Medical Records Error:",
-        error
-      );
-
-      Swal.fire({
-        icon: "error",
-        title: "Unable to Load Medical Records",
-        text: error.message,
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [user.id]);
 
   return (
-    <div className="bg-light min-vh-100">
+    <>
+      <PageHeader title="Medical records" subtitle="Your medical history, added by your doctors" />
 
-      {/* Navbar */}
-
-      <nav className="navbar navbar-dark bg-primary px-4">
-        <span className="navbar-brand fw-bold">
-          🏥 MEDICONNECT
-        </span>
-
-        <Button
-          variant="light"
-          size="sm"
-          onClick={() =>
-            navigate("/patient/dashboard")
-          }
-        >
-          ← Dashboard
-        </Button>
-      </nav>
-
-      <Container className="py-5">
-
-        {/* Header */}
-
-        <div className="mb-4">
-          <h2 className="fw-bold mb-1">
-            Medical Records
-          </h2>
-
-          <p className="text-muted">
-            View your medical history and records.
-          </p>
-        </div>
-
-        {/* Loading */}
-
-        {loading && (
-          <div className="text-center py-5">
-
-            <Spinner animation="border" />
-
-            <p className="mt-3 text-muted">
-              Loading medical records...
-            </p>
-
-          </div>
-        )}
-
-        {/* No records */}
-
-        {!loading && records.length === 0 && (
-          <Card className="border-0 shadow-sm">
-
-            <Card.Body className="text-center py-5">
-
-              <div
-                style={{
-                  fontSize: "60px",
-                }}
+      {loading ? (
+        <Card style={CARD_STYLE}>
+          <Skeleton active paragraph={{ rows: 5 }} />
+        </Card>
+      ) : records.length === 0 ? (
+        <EmptyState
+          kind="records"
+          title="No medical records yet"
+          description="Records appear here after a doctor adds them to your file."
+        />
+      ) : (
+        <Row gutter={[16, 16]}>
+          {records.map((record) => (
+            <Col key={record.id} xs={24} xl={12}>
+              <Card
+                style={{ ...CARD_STYLE, height: "100%" }}
+                title={
+                  <Flex align="center" gap={8}>
+                    <FileTextOutlined style={{ color: "#0d9488" }} />
+                    {fmtDate(record.record_date || record.created_at)}
+                  </Flex>
+                }
+                extra={record.doctor && <Tag color="cyan">Dr. {record.doctor.name}</Tag>}
               >
-                📋
-              </div>
-
-              <h4 className="fw-bold mt-3">
-                No Medical Records
-              </h4>
-
-              <p className="text-muted mb-0">
-                Your medical records will appear here
-                when they are added by your doctor.
-              </p>
-
-            </Card.Body>
-
-          </Card>
-        )}
-
-        {/* Records */}
-
-        {!loading && records.length > 0 && (
-          <Row className="g-4">
-
-            {records.map((record) => (
-              <Col
-                xs={12}
-                md={6}
-                lg={6}
-                key={record.id}
-              >
-
-                <Card className="h-100 border-0 shadow-sm">
-
-                  <Card.Body className="p-4">
-
-                    <div className="d-flex justify-content-between align-items-start mb-3">
-
-                      <div
-                        className="bg-primary text-white rounded-circle d-flex align-items-center justify-content-center"
-                        style={{
-                          width: "55px",
-                          height: "55px",
-                          fontSize: "25px",
-                        }}
-                      >
-                        📋
-                      </div>
-
-                      <Badge bg="primary">
-                        Medical Record
-                      </Badge>
-
-                    </div>
-
-                    <h5 className="fw-bold mb-3">
-                      Medical Record
-                    </h5>
-
-                    <hr />
-
-                    {/* Diagnosis */}
-
-                    <div className="mb-3">
-                      <strong>
-                        Diagnosis
-                      </strong>
-
-                      <p className="text-muted mb-0 mt-1">
-                        {record.diagnosis ||
-                          "Not available"}
-                      </p>
-                    </div>
-
-                    {/* Treatment */}
-
-                    <div className="mb-3">
-                      <strong>
-                        Treatment
-                      </strong>
-
-                      <p className="text-muted mb-0 mt-1">
-                        {record.treatment ||
-                          "Not available"}
-                      </p>
-                    </div>
-
-                    {/* Notes */}
-
-                    <div className="mb-3">
-                      <strong>
-                        Doctor's Notes
-                      </strong>
-
-                      <p className="text-muted mb-0 mt-1">
-                        {record.notes ||
-                          "No notes available"}
-                      </p>
-                    </div>
-
-                    {/* Record Date */}
-
-                    <div className="mb-0">
-                      <strong>
-                        Date
-                      </strong>
-
-                      <p className="text-muted mb-0 mt-1">
-                        {record.record_date ||
-                          record.created_at ||
-                          "Not available"}
-                      </p>
-                    </div>
-
-                  </Card.Body>
-
-                </Card>
-
-              </Col>
-            ))}
-
-          </Row>
-        )}
-
-      </Container>
-    </div>
+                <LabeledText label="Diagnosis">
+                  <Text strong>{record.diagnosis}</Text>
+                </LabeledText>
+                <LabeledText label="Treatment">{record.treatment}</LabeledText>
+                <LabeledText label="Doctor's notes">{record.notes}</LabeledText>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
+    </>
   );
 };
 

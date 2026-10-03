@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Row, Col, Card, Table, Button, Result, Flex, Typography, message } from "antd";
+import { Row, Col, Card, Table, Button, Result, Typography, message } from "antd";
 import {
   CalendarOutlined,
   ClockCircleOutlined,
@@ -11,7 +11,7 @@ import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
 import { getDoctorByUserId } from "../../services/directoryService";
 import { fetchAppointmentsDetailed } from "../../services/appointmentService";
-import { PageHeader, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
+import { HeroBanner, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
 
 const { Text } = Typography;
 
@@ -103,13 +103,26 @@ const DoctorDashboard = () => {
 
   return (
     <>
-      <PageHeader
+      <HeroBanner
+        variant="doctor"
+        art="records"
         title={`Welcome, Dr. ${user.full_name}`}
-        subtitle={doctor ? `${doctor.specialization || "Doctor"} · ${fmtDate(today)}` : ""}
-        extra={
-          <Button type="primary" onClick={() => navigate("/doctor/prescriptions")}>
-            Write prescription
-          </Button>
+        subtitle={
+          loading
+            ? "Checking your schedule..."
+            : todays.length
+            ? `You have ${todays.length} appointment${todays.length > 1 ? "s" : ""} today${pending.length ? `, and ${pending.length} waiting for your confirmation` : ""}.`
+            : `${doctor?.specialization || "Doctor"}. Nothing scheduled for today yet.`
+        }
+        actions={
+          <>
+            <Button size="large" onClick={() => navigate("/doctor/appointments")}>
+              View appointments
+            </Button>
+            <Button size="large" ghost onClick={() => navigate("/doctor/prescriptions")}>
+              Write prescription
+            </Button>
+          </>
         }
       />
 

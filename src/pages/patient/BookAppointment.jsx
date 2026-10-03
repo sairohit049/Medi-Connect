@@ -1,337 +1,239 @@
-
 import React, { useEffect, useState } from "react";
-import {
-  Container,
-  Card,
-  Row,
-  Col,
-  Form,
-  Button,
-  Spinner,
-} from "react-bootstrap";
-import { useNavigate } from "react-router-dom";
-import Swal from "sweetalert2";
+import dayjs from "dayjs";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Row, Col, Card, Form, Input, Select, DatePicker, Button, Flex, Tag, Descriptions, Alert, Typography, message } from "antd";
+import { ClockCircleOutlined } from "@ant-design/icons";
+import { useAuth } from "../../context/AuthContext";
 import { supabase } from "../../services/supabase";
 import { fetchDoctorsWithNames } from "../../services/doctorService";
-import { notifyDoctorById } from "../../services/notificationService";
+import { ensurePatientRecord } from "../../services/patientService";
+import { createAppointment, TIME_SLOTS } from "../../services/appointmentService";
+import { PageHeader, CARD_STYLE, slotLabel } from "../../components/ui";
+import { DoctorAvatar } from "../../components/art";
+
+const { Text } = Typography;
+
+// Form.Item hands this component `value` / `onChange`
+const SlotPicker = ({ value, onChange, isDisabled }) => (
+  <Flex wrap="wrap" gap={8}>
+    {TIME_SLOTS.map((slot) => (
+      <Button
+        key={slot}
+        type={value === slot ? "primary" : "default"}
+        disabled={isDisabled(slot)}
+        onClick={() => onChange?.(slot)}
+      >
+        {slotLabel(slot)}
+      </Button>
+    ))}
+  </Flex>
+);
 
 const BookAppointment = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [form] = Form.useForm();
+
+  const doctorId = Form.useWatch("doctor_id", form);
+  const date = Form.useWatch("date", form);
 
   const [doctors, setDoctors] = useState([]);
-  const [doctorId, setDoctorId] = useState("");
-  const [appointmentDate, setAppointmentDate] = useState("");
-  const [appointmentTime, setAppointmentTime] = useState("");
-  const [reason, setReason] = useState("");
-
-  const [loading, setLoading] = useState(true);
+  const [loadingDoctors, setLoadingDoctors] = useState(true);
+  const [booked, setBooked] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
+  // Load doctors, and pre-select one when we arrive from "Find doctor"
   useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem("user"));
+    let active = true;
 
-    if (!storedUser) {
-      navigate("/login");
-      return;
+    fetchDoctorsWithNames()
+      .then((data) => {
+        if (!active) return;
+        setDoctors(data || []);
+
+        const wanted = searchParams.get("doctor");
+        const match = (data || []).find((d) => String(d.id) === wanted);
+        if (match) form.setFieldValue("doctor_id", match.id);
+      })
+      .catch((error) => message.error(error.message))
+      .finally(() => active && setLoadingDoctors(false));
+
+    return () => {
+      active = false;
+    };
+  }, [form, searchParams]);
+
+  // Slots already taken for this doctor on this day
+  useEffect(() => {
+    if (!doctorId || !date) {
+      setBooked([]);
+      return undefined;
     }
 
-    loadDoctors();
-  }, []);
+    let active = true;
 
-  const loadDoctors = async () => {
-    try {
-      const data = await fetchDoctorsWithNames();
-
-      setDoctors(data || []);
-    } catch (error) {
-      console.error("Error loading doctors:", error);
-
-      Swal.fire({
-        icon: "error",
-        title: "Unable to Load Doctors",
-        text: error.message,
+    supabase
+      .from("appointments")
+      .select("appointment_time")
+      .eq("doctor_id", doctorId)
+      .eq("appointment_date", date.format("YYYY-MM-DD"))
+      .neq("status", "cancelled")
+      .then(({ data }) => {
+        if (active) setBooked((data || []).map((row) => String(row.appointment_time).slice(0, 5)));
       });
-    } finally {
-      setLoading(false);
-    }
+
+    return () => {
+      active = false;
+    };
+  }, [doctorId, date]);
+
+  const doctor = doctors.find((d) => d.id === doctorId);
+
+  const isSlotDisabled = (slot) => {
+    if (!date) return true;
+    if (booked.includes(slot)) return true;
+    return dayjs(`${date.format("YYYY-MM-DD")} ${slot}`).isBefore(dayjs());
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    const storedUser = JSON.parse(localStorage.getItem("user"));
-
-    if (!storedUser) {
-      navigate("/login");
-      return;
-    }
-
-    if (
-      !doctorId ||
-      !appointmentDate ||
-      !appointmentTime ||
-      !reason.trim()
-    ) {
-      Swal.fire({
-        icon: "warning",
-        title: "Missing Fields",
-        text: "Please complete all fields.",
-      });
-      return;
-    }
-
-    // Check that the appointment date is not in the past.
-    const selectedDateTime = new Date(
-      `${appointmentDate}T${appointmentTime}`
-    );
-
-    if (selectedDateTime <= new Date()) {
-      Swal.fire({
-        icon: "warning",
-        title: "Invalid Date or Time",
-        text: "Please select a future appointment date and time.",
-      });
-      return;
-    }
-
+  const onFinish = async (values) => {
+    setSubmitting(true);
     try {
-      setSubmitting(true);
+      const patient = await ensurePatientRecord(user.id);
 
-      // Find the patient's record.
-      // patients.user_id links to profiles.id.
-      const { data: patient, error: patientError } =
-        await supabase
-          .from("patients")
-          .select("id")
-          .eq("user_id", storedUser.id)
-          .maybeSingle();
-
-      if (patientError) throw patientError;
-
-      if (!patient) {
-        Swal.fire({
-          icon: "warning",
-          title: "Patient Record Not Found",
-          text:
-            "Your patient record has not been created yet. " +
-            "Please create the patient record before booking.",
-        });
-        return;
-      }
-
-      // Create appointment request.
-      const { error: appointmentError } = await supabase
-        .from("appointments")
-        .insert([
-          {
-            patient_id: patient.id,
-            doctor_id: doctorId,
-            appointment_date: appointmentDate,
-            appointment_time: appointmentTime,
-            reason: reason.trim(),
-            status: "pending",
-          },
-        ]);
-
-      if (appointmentError) throw appointmentError;
-
-      await notifyDoctorById(
-        doctorId,
-        "New appointment request",
-        `${storedUser.full_name || "A patient"} requested an appointment on ${appointmentDate} at ${appointmentTime}.`
-      );
-
-      await Swal.fire({
-        icon: "success",
-        title: "Appointment Requested!",
-        text:
-          "Your appointment request has been submitted.",
-        confirmButtonText: "View Appointments",
+      await createAppointment({
+        patient_id: patient.id,
+        doctor_id: values.doctor_id,
+        appointment_date: values.date.format("YYYY-MM-DD"),
+        appointment_time: values.time,
+        reason: values.reason.trim(),
       });
 
-      setDoctorId("");
-      setAppointmentDate("");
-      setAppointmentTime("");
-      setReason("");
-
+      message.success("Appointment requested. The doctor will confirm it shortly.");
       navigate("/patient/appointments");
     } catch (error) {
-      console.error("Appointment Error:", error);
-
-      Swal.fire({
-        icon: "error",
-        title: "Booking Failed",
-        text: error.message,
-      });
+      message.error(error.message);
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Prevent selecting past dates.
-  const today = new Date();
-  const minDate =
-    `${today.getFullYear()}-${String(
-      today.getMonth() + 1
-    ).padStart(2, "0")}-${String(
-      today.getDate()
-    ).padStart(2, "0")}`;
-
   return (
-    <div className="bg-light min-vh-100">
-      <nav className="navbar navbar-dark bg-primary px-4">
-        <span className="navbar-brand fw-bold">
-          🏥 MEDICONNECT
-        </span>
+    <>
+      <PageHeader title="Book an appointment" subtitle="Choose a doctor, a day and a time that suits you" />
 
-        <Button
-          variant="light"
-          size="sm"
-          onClick={() => navigate("/patient/dashboard")}
-        >
-          ← Dashboard
-        </Button>
-      </nav>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={16}>
+          <Card style={CARD_STYLE}>
+            {!loadingDoctors && doctors.length === 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="No doctors are listed yet. Please check back soon."
+              />
+            )}
 
-      <Container className="py-5">
-        <Row className="justify-content-center">
-          <Col xs={12} md={9} lg={7}>
-            <Card className="border-0 shadow-sm">
-              <Card.Body className="p-4 p-md-5">
-                <h2 className="fw-bold mb-2">
-                  Book an Appointment
-                </h2>
+            <Form
+              form={form}
+              layout="vertical"
+              onFinish={onFinish}
+              onValuesChange={(changed) => {
+                if ("doctor_id" in changed || "date" in changed) form.setFieldValue("time", undefined);
+              }}
+            >
+              <Row gutter={16}>
+                <Col xs={24} md={14}>
+                  <Form.Item name="doctor_id" label="Doctor" rules={[{ required: true, message: "Choose a doctor" }]}>
+                    <Select
+                      showSearch
+                      size="large"
+                      loading={loadingDoctors}
+                      optionFilterProp="label"
+                      placeholder="Choose a doctor"
+                      options={doctors.map((d) => ({
+                        value: d.id,
+                        label: `Dr. ${d.full_name}${d.specialization ? ` - ${d.specialization}` : ""}`,
+                      }))}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={10}>
+                  <Form.Item name="date" label="Date" rules={[{ required: true, message: "Pick a date" }]}>
+                    <DatePicker
+                      size="large"
+                      style={{ width: "100%" }}
+                      disabledDate={(d) => d && d.isBefore(dayjs().startOf("day"))}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
 
-                <p className="text-muted mb-4">
-                  Select a doctor and request a visit.
-                </p>
+              <Form.Item
+                name="time"
+                label="Time slot"
+                extra={!date ? "Pick a date to see available times" : "Greyed-out times are already booked or have passed"}
+                rules={[{ required: true, message: "Pick a time slot" }]}
+              >
+                <SlotPicker isDisabled={isSlotDisabled} />
+              </Form.Item>
 
-                {loading ? (
-                  <div className="text-center py-5">
-                    <Spinner animation="border" />
-                    <p className="mt-3">
-                      Loading doctors...
-                    </p>
-                  </div>
-                ) : (
-                  <Form onSubmit={handleSubmit}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>
-                        Select Doctor
-                      </Form.Label>
+              <Form.Item
+                name="reason"
+                label="Reason for visit"
+                rules={[{ required: true, whitespace: true, message: "Briefly describe the reason for your visit" }]}
+              >
+                <Input.TextArea rows={4} maxLength={300} showCount placeholder="Briefly describe the reason for your visit" />
+              </Form.Item>
 
-                      <Form.Select
-                        value={doctorId}
-                        onChange={(e) =>
-                          setDoctorId(e.target.value)
-                        }
-                        required
-                      >
-                        <option value="">
-                          Choose a doctor
-                        </option>
+              <Button
+                type="primary"
+                htmlType="submit"
+                size="large"
+                loading={submitting}
+                disabled={doctors.length === 0}
+              >
+                Request appointment
+              </Button>
+            </Form>
+          </Card>
+        </Col>
 
-                        {doctors.map((doctor) => (
-                          <option
-                            key={doctor.id}
-                            value={doctor.id}
-                          >
-                            {doctor.full_name ||
-                              "Doctor"}{" "}
-                            {doctor.specialization
-                              ? `— ${doctor.specialization}`
-                              : ""}
-                          </option>
-                        ))}
-                      </Form.Select>
-
-                      {doctors.length === 0 && (
-                        <Form.Text className="text-danger">
-                          No doctors are currently listed.
-                        </Form.Text>
-                      )}
-                    </Form.Group>
-
-                    <Row>
-                      <Col sm={6}>
-                        <Form.Group className="mb-3">
-                          <Form.Label>
-                            Appointment Date
-                          </Form.Label>
-
-                          <Form.Control
-                            type="date"
-                            min={minDate}
-                            value={appointmentDate}
-                            onChange={(e) =>
-                              setAppointmentDate(
-                                e.target.value
-                              )
-                            }
-                            required
-                          />
-                        </Form.Group>
-                      </Col>
-
-                      <Col sm={6}>
-                        <Form.Group className="mb-3">
-                          <Form.Label>
-                            Appointment Time
-                          </Form.Label>
-
-                          <Form.Control
-                            type="time"
-                            value={appointmentTime}
-                            onChange={(e) =>
-                              setAppointmentTime(
-                                e.target.value
-                              )
-                            }
-                            required
-                          />
-                        </Form.Group>
-                      </Col>
-                    </Row>
-
-                    <Form.Group className="mb-4">
-                      <Form.Label>
-                        Reason for Visit
-                      </Form.Label>
-
-                      <Form.Control
-                        as="textarea"
-                        rows={4}
-                        placeholder="Briefly describe the reason for your visit"
-                        value={reason}
-                        onChange={(e) =>
-                          setReason(e.target.value)
-                        }
-                        required
-                      />
-                    </Form.Group>
-
-                    <div className="d-grid">
-                      <Button
-                        type="submit"
-                        variant="primary"
-                        size="lg"
-                        disabled={
-                          submitting || doctors.length === 0
-                        }
-                      >
-                        {submitting
-                          ? "Submitting Request..."
-                          : "Request Appointment"}
-                      </Button>
+        <Col xs={24} lg={8}>
+          <Card title="Your doctor" style={CARD_STYLE}>
+            {doctor ? (
+              <>
+                <Flex align="center" gap={14} style={{ marginBottom: 14 }}>
+                  <DoctorAvatar name={doctor.full_name} size={64} ring />
+                  <div>
+                    <Text strong style={{ fontSize: 16 }}>
+                      Dr. {doctor.full_name}
+                    </Text>
+                    <div style={{ marginTop: 4 }}>
+                      <Tag color="cyan" style={{ margin: 0 }}>
+                        {doctor.specialization || "General Physician"}
+                      </Tag>
                     </div>
-                  </Form>
-                )}
-              </Card.Body>
-            </Card>
-          </Col>
-        </Row>
-      </Container>
-    </div>
+                  </div>
+                </Flex>
+                <Descriptions column={1} size="small">
+                  <Descriptions.Item label="Qualification">{doctor.qualification || "-"}</Descriptions.Item>
+                  <Descriptions.Item label="Experience">
+                    {doctor.experience != null ? `${doctor.experience} years` : "-"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Fee">
+                    {doctor.consultation_fee != null ? `₹${doctor.consultation_fee}` : "-"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={<ClockCircleOutlined />}>{doctor.availability || "-"}</Descriptions.Item>
+                </Descriptions>
+              </>
+            ) : (
+              <Text type="secondary">Select a doctor to see their details here.</Text>
+            )}
+          </Card>
+        </Col>
+      </Row>
+    </>
   );
 };
 

@@ -6,7 +6,7 @@ import {
 } from "@ant-design/icons";
 import { supabase } from "../../services/supabase";
 import { fetchAppointmentsDetailed } from "../../services/appointmentService";
-import { PageHeader, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
+import { HeroBanner, StatCard, StatusTag, fmtDate, fmtTime, todayString } from "../../components/ui";
 
 const { Text } = Typography;
 
@@ -75,7 +75,21 @@ const AdminDashboard = () => {
 
   return (
     <>
-      <PageHeader title="Hospital overview" subtitle="Live numbers from your database" />
+      <HeroBanner
+        variant="admin"
+        art="chart"
+        title="Hospital overview"
+        subtitle={
+          loading
+            ? "Live numbers from your database."
+            : `${stats.today} appointment${stats.today === 1 ? "" : "s"} today across ${stats.doctors} doctor${stats.doctors === 1 ? "" : "s"}. Live numbers from your database.`
+        }
+        actions={
+          <Button size="large" onClick={() => navigate("/admin/reports")}>
+            Open reports
+          </Button>
+        }
+      />
 
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} xl={8}><StatCard loading={loading} title="Patients" value={stats.patients} icon={<TeamOutlined />} /></Col>
